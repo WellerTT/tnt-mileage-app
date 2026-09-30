@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="actions">
+    <a class="button-link secondary" href="{{ url_for('admin_dashboard') }}">← Back to Dashboard</a>
+</div>
+
+<div class="card">
+    <h2>Add Driver Login</h2>
+    <form method="post" class="grid-form">
+        <div>
+            <label>Driver Name</label>
+            <input name="name" required>
+        </div>
+        <div>
+            <label>Username</label>
+            <input name="username" required>
+        </div>
+        <div>
+            <label>Temporary Password</label>
+            <input type="password" name="password" required>
+        </div>
+        <div class="full">
+            <button type="submit">Create Driver Login</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <h3>Current Drivers</h3>
+    <div class="table-wrap">
+    <table>
+        <thead><tr><th>Name</th><th>Username</th><th>Status</th></tr></thead>
+        <tbody>
+        {% for d in drivers %}
+            <tr><td>{{ d.name }}</td><td>{{ d.username }}</td><td>{{ "Active" if d.active else "Inactive" }}</td></tr>
+        {% else %}
+            <tr><td colspan="3">No drivers added yet.</td></tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}

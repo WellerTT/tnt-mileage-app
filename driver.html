@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="top-row">
+    <div>
+        <h2>My Mileage</h2>
+        <p class="muted">Only you and TNT administration can view your entries.</p>
+    </div>
+    <div class="stat">
+        <strong>{{ "%.1f"|format(total_miles) }}</strong>
+        <span>Total Miles</span>
+    </div>
+</div>
+
+<div class="card">
+    <h3>Submit Mileage</h3>
+    <form method="post" class="grid-form">
+        <div>
+            <label>Trip Date</label>
+            <input type="date" name="trip_date" required>
+        </div>
+        <div>
+            <label>Unit / Truck Number</label>
+            <input name="unit_number" placeholder="Example: 1045">
+        </div>
+        <div>
+            <label>Pickup City</label>
+            <input name="pickup_city" placeholder="City, State">
+        </div>
+        <div>
+            <label>Delivery City</label>
+            <input name="delivery_city" placeholder="City, State">
+        </div>
+        <div>
+            <label>Beginning Miles</label>
+            <input type="number" step="0.1" name="beginning_miles" required>
+        </div>
+        <div>
+            <label>Ending Miles</label>
+            <input type="number" step="0.1" name="ending_miles" required>
+        </div>
+        <div class="full">
+            <label>Notes</label>
+            <textarea name="notes" rows="3" placeholder="Optional"></textarea>
+        </div>
+        <div class="full">
+            <button type="submit">Submit Mileage</button>
+        </div>
+    </form>
+</div>
+
+<div class="card">
+    <h3>My Previous Entries</h3>
+    <div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th><th>Unit</th><th>Route</th><th>Begin</th><th>End</th><th>Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for e in entries %}
+            <tr>
+                <td>{{ e.trip_date }}</td>
+                <td>{{ e.unit_number or "" }}</td>
+                <td>{{ e.pickup_city or "" }} → {{ e.delivery_city or "" }}</td>
+                <td>{{ "%.1f"|format(e.beginning_miles) }}</td>
+                <td>{{ "%.1f"|format(e.ending_miles) }}</td>
+                <td><strong>{{ "%.1f"|format(e.total_miles) }}</strong></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6">No mileage submitted yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+{% endblock %}
