@@ -6,7 +6,7 @@
 
 <div class="card">
     <h2>Add Driver Login</h2>
-    <form method="post" class="grid-form">
+    <form method="post" action="{{ url_for('add_driver') }}" class="grid-form">
         <div>
             <label>Driver Name</label>
             <input name="name" required>
