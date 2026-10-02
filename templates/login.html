@@ -3,14 +3,41 @@
 <div class="card login-card">
     <h2>Driver / Admin Login</h2>
     <p>Enter your private username and password.</p>
-    <form method="post" action="{{ url_for('login') }}">
+   <form method="post" action="{{ url_for('login') }}">
     <label>Username</label>
-    <input name="username" required autocomplete="username">
+    <input id="username" name="username" required autocomplete="username">
 
     <label>Password</label>
     <input type="password" name="password" required autocomplete="current-password">
 
+    <label style="display:flex; align-items:center; gap:8px; margin-top:12px;">
+        <input type="checkbox" id="rememberMe" style="width:auto;">
+        Remember Me
+    </label>
+
     <button type="submit">Log In</button>
 </form>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const username = document.getElementById("username");
+    const rememberMe = document.getElementById("rememberMe");
+
+    const savedUsername = localStorage.getItem("tntSavedUsername");
+
+    if (savedUsername) {
+        username.value = savedUsername;
+        rememberMe.checked = true;
+    }
+
+    document.querySelector("form").addEventListener("submit", function () {
+        if (rememberMe.checked) {
+            localStorage.setItem("tntSavedUsername", username.value);
+        } else {
+            localStorage.removeItem("tntSavedUsername");
+        }
+    });
+});
+</script>
 </div>
 {% endblock %}
