@@ -94,7 +94,7 @@ def login():
         flash("Invalid username or password.", "error")
 
     return render_template("login.html")
-    @app.route("/forgot-password", methods=["GET", "POST"])
+@app.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
     if request.method == "POST":
         username = request.form["username"].strip()
@@ -118,7 +118,6 @@ def forgot_password():
             )
 
     return render_template("forgot_password.html")
-
 @app.route("/logout")
 def logout():
     session.clear()
