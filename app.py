@@ -68,6 +68,11 @@ def require_login(role=None):
 
 @app.route("/", methods=["GET", "POST"])
 def login():
+    if request.method == "GET" and "user_id" in session:
+        if session.get("role") == "admin":
+            return redirect(url_for("admin_dashboard"))
+        return redirect(url_for("driver_dashboard"))
+
     if request.method == "POST":
         username = request.form["username"].strip()
         password = request.form["password"]
