@@ -50,14 +50,15 @@
         <tbody>
             {% for e in entries %}
             <tr>
-                <td>{{ e.trip_date }}</td>
-                <td>{{ e.driver_name }}</td>
-                <td>{{ e.unit_number or "" }}</td>
-                <td>{{ e.pickup_city or "" }} → {{ e.delivery_city or "" }}</td>
-                <td>{{ "%.1f"|format(e.beginning_miles) }}</td>
-                <td>{{ "%.1f"|format(e.ending_miles) }}</td>
-                <td><strong>{{ "%.1f"|format(e.total_miles) }}</strong></td>
-                <td>{{ e.notes or "" }}</td>
+
+<td>{{ e.trip_date }}</td>
+<td>{{ e.driver_name }}</td>
+<td>{{ e.unit_number or "" }}</td>
+<td>{{ e.pickup_city or "" }} → {{ e.delivery_city or "" }}</td>
+<td>{{ "%.1f"|format(e.beginning_miles) }}</td>
+<td>{{ "%.1f"|format(e.ending_miles) }}</td>
+<td><strong>{{ "%.1f"|format(e.total_miles) }}</strong></td>
+<td>{{ e.notes or "" }}</td>
             </tr>
             {% else %}
             <tr><td colspan="8">No mileage has been submitted yet.</td></tr>
