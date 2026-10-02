@@ -4,11 +4,13 @@
     <h2>Driver / Admin Login</h2>
     <p>Enter your private username and password.</p>
     <form method="post" action="{{ url_for('login') }}">
-        <label>Username</label>
-        <input name="username" required autocomplete="username">
-        <label>Password</label>
-        <input type="password" name="password" required autocomplete="current-password">
-        <button type="submit">Log In</button>
-    </form>
+    <label>Username</label>
+    <input name="username" required autocomplete="username">
+
+    <label>Password</label>
+    <input type="password" name="password" required autocomplete="current-password">
+
+    <button type="submit">Log In</button>
+</form>
 </div>
 {% endblock %}
