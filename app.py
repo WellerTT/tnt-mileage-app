@@ -94,6 +94,30 @@ def login():
         flash("Invalid username or password.", "error")
 
     return render_template("login.html")
+    @app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        username = request.form["username"].strip()
+
+        conn = get_db()
+        user = conn.execute(
+            "SELECT * FROM users WHERE username=? AND active=1",
+            (username,)
+        ).fetchone()
+        conn.close()
+
+        if user:
+            flash(
+                "Your password reset request has been received. Please contact TNT Admin for a temporary password.",
+                "success"
+            )
+        else:
+            flash(
+                "Username not found. Please check your username and try again.",
+                "error"
+            )
+
+    return render_template("forgot_password.html")
 
 @app.route("/logout")
 def logout():
