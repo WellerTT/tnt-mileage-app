@@ -1,10 +1,11 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 
 app = Flask(__name__)
+app.permanent_session_lifetime = timedelta(days=30)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret-key")
 
 DB = "tnt_mileage.db"
@@ -70,6 +71,7 @@ def login():
     if request.method == "POST":
         username = request.form["username"].strip()
         password = request.form["password"]
+        remember_me = request.form.get("remember_me") == "yes"
         conn = get_db()
         user = conn.execute(
             "SELECT * FROM users WHERE username=? AND active=1", (username,)
@@ -78,6 +80,7 @@ def login():
 
         if user and check_password_hash(user["password_hash"], password):
             session.clear()
+            session.permanent = remember_me
             session["user_id"] = user["id"]
             session["name"] = user["name"]
             session["role"] = user["role"]
