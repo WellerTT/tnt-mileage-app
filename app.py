@@ -61,25 +61,27 @@ def init_db():
         "SELECT id FROM users WHERE role=%s LIMIT 1",
         ("admin",)
     )
+
     admin = cur.fetchone()
 
-  admin_password = os.environ.get("ADMIN_PASSWORD")
+    admin_password = os.environ.get("ADMIN_PASSWORD")
 
-if not admin:
-    cur.execute(
-        """
-        INSERT INTO users (name, username, password_hash, role)
-        VALUES (%s, %s, %s, %s)
-        """,
-        (
-            "TNT Admin",
-            "admin",
-            generate_password_hash(admin_password or "ChangeMeImmediately"),
-            "admin"
+    if not admin:
+        cur.execute(
+            """
+            INSERT INTO users (name, username, password_hash, role)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (
+                "TNT Admin",
+                "admin",
+                generate_password_hash(
+                    admin_password or "ChangeMeImmediately"
+                ),
+                "admin"
+            )
         )
-    )
-else:
-    if admin_password:
+    elif admin_password:
         cur.execute(
             """
             UPDATE users
@@ -91,7 +93,7 @@ else:
             )
         )
 
-conn.commit()
+    conn.commit()
 
     cur.close()
     conn.close()
@@ -249,8 +251,7 @@ def driver_dashboard():
 
         cur.execute(
             """
-            INSERT INTO mileage_entries
-            (
+            INSERT INTO mileage_entries (
                 user_id,
                 trip_date,
                 unit_number,
@@ -400,10 +401,13 @@ def add_driver():
         try:
             cur.execute(
                 """
-                INSERT INTO users
-                    (name, username, password_hash, role)
-                VALUES
-                    (%s, %s, %s, 'driver')
+                INSERT INTO users (
+                    name,
+                    username,
+                    password_hash,
+                    role
+                )
+                VALUES (%s, %s, %s, 'driver')
                 """,
                 (
                     name,
@@ -443,6 +447,7 @@ def add_driver():
             username,
             active
         FROM users
+        WHERE role='driver'
         ORDER BY name
     """)
 
