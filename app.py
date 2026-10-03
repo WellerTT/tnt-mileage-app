@@ -5,6 +5,7 @@ import psycopg2.extras
 from datetime import datetime, timedelta
 import os
 
+
 app = Flask(__name__)
 
 app.permanent_session_lifetime = timedelta(days=30)
@@ -12,6 +13,10 @@ app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret-key")
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
+
+# ---------------------------------------------------------
+# DATABASE CONNECTION
+# ---------------------------------------------------------
 
 def get_db():
     if not DATABASE_URL:
@@ -23,10 +28,15 @@ def get_db():
     )
 
 
+# ---------------------------------------------------------
+# DATABASE SETUP
+# ---------------------------------------------------------
+
 def init_db():
     conn = get_db()
     cur = conn.cursor()
 
+    # Users table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -38,6 +48,7 @@ def init_db():
         )
     """)
 
+    # Mileage entries table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mileage_entries (
             id SERIAL PRIMARY KEY,
@@ -57,6 +68,7 @@ def init_db():
 
     conn.commit()
 
+    # Check for admin account
     cur.execute(
         "SELECT id FROM users WHERE role=%s LIMIT 1",
         ("admin",)
@@ -66,10 +78,16 @@ def init_db():
 
     admin_password = os.environ.get("ADMIN_PASSWORD")
 
+    # Create admin if one does not exist
     if not admin:
         cur.execute(
             """
-            INSERT INTO users (name, username, password_hash, role)
+            INSERT INTO users (
+                name,
+                username,
+                password_hash,
+                role
+            )
             VALUES (%s, %s, %s, %s)
             """,
             (
@@ -81,6 +99,8 @@ def init_db():
                 "admin"
             )
         )
+
+    # Update admin password to match Render ADMIN_PASSWORD
     elif admin_password:
         cur.execute(
             """
@@ -104,6 +124,10 @@ def setup():
     init_db()
 
 
+# ---------------------------------------------------------
+# LOGIN HELPER
+# ---------------------------------------------------------
+
 def require_login(role=None):
     if "user_id" not in session:
         return False
@@ -114,15 +138,22 @@ def require_login(role=None):
     return True
 
 
+# ---------------------------------------------------------
+# LOGIN
+# ---------------------------------------------------------
+
 @app.route("/", methods=["GET", "POST"])
 def login():
+
     if request.method == "GET" and "user_id" in session:
+
         if session.get("role") == "admin":
             return redirect(url_for("admin_dashboard"))
 
         return redirect(url_for("driver_dashboard"))
 
     if request.method == "POST":
+
         username = request.form["username"].strip()
         password = request.form["password"]
         remember_me = request.form.get("remember_me") == "yes"
@@ -145,8 +176,13 @@ def login():
         cur.close()
         conn.close()
 
-        if user and check_password_hash(user["password_hash"], password):
+        if user and check_password_hash(
+            user["password_hash"],
+            password
+        ):
+
             session.clear()
+
             session.permanent = remember_me
 
             session["user_id"] = user["id"]
@@ -158,14 +194,23 @@ def login():
 
             return redirect(url_for("driver_dashboard"))
 
-        flash("Invalid username or password.", "error")
+        flash(
+            "Invalid username or password.",
+            "error"
+        )
 
     return render_template("login.html")
 
 
+# ---------------------------------------------------------
+# FORGOT PASSWORD
+# ---------------------------------------------------------
+
 @app.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
+
     if request.method == "POST":
+
         username = request.form["username"].strip()
 
         conn = get_db()
@@ -187,45 +232,90 @@ def forgot_password():
         conn.close()
 
         if user:
+
             flash(
                 "Your password reset request has been received. "
                 "Please contact TNT Admin for a temporary password.",
                 "success"
             )
+
         else:
+
             flash(
-                "Username not found. Please check your username and try again.",
+                "Username not found. "
+                "Please check your username and try again.",
                 "error"
             )
 
-    return render_template("forgot_password.html")
+    return render_template(
+        "forgot_password.html"
+    )
 
+
+# ---------------------------------------------------------
+# LOGOUT
+# ---------------------------------------------------------
 
 @app.route("/logout")
 def logout():
-    session.clear()
-    return redirect(url_for("login"))
 
+    session.clear()
+
+    return redirect(
+        url_for("login")
+    )
+
+
+# ---------------------------------------------------------
+# DRIVER DASHBOARD
+# ---------------------------------------------------------
 
 @app.route("/driver", methods=["GET", "POST"])
 def driver_dashboard():
+
     if not require_login("driver"):
         return redirect(url_for("login"))
 
     conn = get_db()
     cur = conn.cursor()
 
+    # Submit mileage
     if request.method == "POST":
+
         trip_date = request.form["trip_date"]
-        unit_number = request.form.get("unit_number", "").strip()
-        pickup_city = request.form.get("pickup_city", "").strip()
-        delivery_city = request.form.get("delivery_city", "").strip()
-        notes = request.form.get("notes", "").strip()
+
+        unit_number = request.form.get(
+            "unit_number",
+            ""
+        ).strip()
+
+        pickup_city = request.form.get(
+            "pickup_city",
+            ""
+        ).strip()
+
+        delivery_city = request.form.get(
+            "delivery_city",
+            ""
+        ).strip()
+
+        notes = request.form.get(
+            "notes",
+            ""
+        ).strip()
 
         try:
-            beginning = float(request.form["beginning_miles"])
-            ending = float(request.form["ending_miles"])
+
+            beginning = float(
+                request.form["beginning_miles"]
+            )
+
+            ending = float(
+                request.form["ending_miles"]
+            )
+
         except ValueError:
+
             cur.close()
             conn.close()
 
@@ -234,9 +324,12 @@ def driver_dashboard():
                 "error"
             )
 
-            return redirect(url_for("driver_dashboard"))
+            return redirect(
+                url_for("driver_dashboard")
+            )
 
         if ending < beginning:
+
             cur.close()
             conn.close()
 
@@ -245,7 +338,9 @@ def driver_dashboard():
                 "error"
             )
 
-            return redirect(url_for("driver_dashboard"))
+            return redirect(
+                url_for("driver_dashboard")
+            )
 
         total = ending - beginning
 
@@ -263,7 +358,10 @@ def driver_dashboard():
                 notes,
                 created_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s
+            )
             """,
             (
                 session["user_id"],
@@ -275,17 +373,21 @@ def driver_dashboard():
                 ending,
                 total,
                 notes,
-                datetime.now().isoformat(timespec="seconds")
+                datetime.now().isoformat(
+                    timespec="seconds"
+                )
             )
         )
 
         conn.commit()
 
         flash(
-            f"Mileage submitted: {total:,.1f} miles.",
+            f"Mileage submitted: "
+            f"{total:,.1f} miles.",
             "success"
         )
 
+    # Driver mileage history
     cur.execute(
         """
         SELECT *
@@ -293,21 +395,31 @@ def driver_dashboard():
         WHERE user_id=%s
         ORDER BY trip_date DESC, id DESC
         """,
-        (session["user_id"],)
+        (
+            session["user_id"],
+        )
     )
 
     entries = cur.fetchall()
 
+    # Driver total mileage
     cur.execute(
         """
-        SELECT COALESCE(SUM(total_miles), 0) AS total
+        SELECT
+            COALESCE(
+                SUM(total_miles),
+                0
+            ) AS total
         FROM mileage_entries
         WHERE user_id=%s
         """,
-        (session["user_id"],)
+        (
+            session["user_id"],
+        )
     )
 
     total_row = cur.fetchone()
+
     total_miles = total_row["total"]
 
     cur.close()
@@ -320,14 +432,22 @@ def driver_dashboard():
     )
 
 
+# ---------------------------------------------------------
+# ADMIN DASHBOARD
+# ---------------------------------------------------------
+
 @app.route("/admin")
 def admin_dashboard():
+
     if not require_login("admin"):
-        return redirect(url_for("login"))
+        return redirect(
+            url_for("login")
+        )
 
     conn = get_db()
     cur = conn.cursor()
 
+    # All mileage entries
     cur.execute("""
         SELECT
             m.*,
@@ -336,38 +456,52 @@ def admin_dashboard():
         FROM mileage_entries m
         JOIN users u
             ON u.id = m.user_id
-        ORDER BY m.trip_date DESC, m.id DESC
+        ORDER BY
+            m.trip_date DESC,
+            m.id DESC
     """)
 
     entries = cur.fetchall()
 
+    # Totals by driver
     cur.execute("""
         SELECT
             u.id,
             u.name,
             u.username,
-            COALESCE(SUM(m.total_miles), 0) AS total_miles,
+            COALESCE(
+                SUM(m.total_miles),
+                0
+            ) AS total_miles,
             COUNT(m.id) AS entry_count
         FROM users u
         LEFT JOIN mileage_entries m
             ON m.user_id = u.id
-        WHERE u.role='driver'
-          AND u.active=1
+        WHERE
+            u.role='driver'
+            AND u.active=1
         GROUP BY
             u.id,
             u.name,
             u.username
-        ORDER BY u.name
+        ORDER BY
+            u.name
     """)
 
     driver_totals = cur.fetchall()
 
+    # Grand total mileage
     cur.execute("""
-        SELECT COALESCE(SUM(total_miles), 0) AS total
+        SELECT
+            COALESCE(
+                SUM(total_miles),
+                0
+            ) AS total
         FROM mileage_entries
     """)
 
     grand_total_row = cur.fetchone()
+
     grand_total = grand_total_row["total"]
 
     cur.close()
@@ -381,24 +515,107 @@ def admin_dashboard():
     )
 
 
-@app.route("/admin/add-driver", methods=["GET", "POST"])
-def add_driver():
-    if not require_login("admin"):
-        return redirect(url_for("login"))
+# ---------------------------------------------------------
+# DELETE MILEAGE ENTRY
+# ADMIN ONLY
+# ---------------------------------------------------------
 
+@app.route(
+    "/admin/delete-entry/<int:entry_id>",
+    methods=["POST"]
+)
+def delete_entry(entry_id):
+
+    if not require_login("admin"):
+        return redirect(
+            url_for("login")
+        )
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        DELETE FROM mileage_entries
+        WHERE id=%s
+        """,
+        (
+            entry_id,
+        )
+    )
+
+    deleted = cur.rowcount
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    if deleted:
+
+        flash(
+            "Mileage entry deleted.",
+            "success"
+        )
+
+    else:
+
+        flash(
+            "Mileage entry was not found.",
+            "error"
+        )
+
+    return redirect(
+        url_for("admin_dashboard")
+    )
+
+
+# ---------------------------------------------------------
+# ADD DRIVER
+# ---------------------------------------------------------
+
+@app.route(
+    "/admin/add-driver",
+    methods=["GET", "POST"]
+)
+def add_driver():
+
+    if not require_login("admin"):
+        return redirect(
+            url_for("login")
+        )
+
+    # Add driver
     if request.method == "POST":
-        name = request.form["name"].strip()
-        username = request.form["username"].strip()
-        password = request.form["password"]
+
+        name = request.form[
+            "name"
+        ].strip()
+
+        username = request.form[
+            "username"
+        ].strip()
+
+        password = request.form[
+            "password"
+        ]
 
         if not name or not username or not password:
-            flash("All fields are required.", "error")
-            return redirect(url_for("add_driver"))
+
+            flash(
+                "All fields are required.",
+                "error"
+            )
+
+            return redirect(
+                url_for("add_driver")
+            )
 
         conn = get_db()
         cur = conn.cursor()
 
         try:
+
             cur.execute(
                 """
                 INSERT INTO users (
@@ -407,12 +624,19 @@ def add_driver():
                     password_hash,
                     role
                 )
-                VALUES (%s, %s, %s, 'driver')
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    'driver'
+                )
                 """,
                 (
                     name,
                     username,
-                    generate_password_hash(password)
+                    generate_password_hash(
+                        password
+                    )
                 )
             )
 
@@ -424,6 +648,7 @@ def add_driver():
             )
 
         except psycopg2.IntegrityError:
+
             conn.rollback()
 
             flash(
@@ -432,11 +657,15 @@ def add_driver():
             )
 
         finally:
+
             cur.close()
             conn.close()
 
-        return redirect(url_for("add_driver"))
+        return redirect(
+            url_for("add_driver")
+        )
 
+    # Display current drivers
     conn = get_db()
     cur = conn.cursor()
 
@@ -462,7 +691,12 @@ def add_driver():
     )
 
 
+# ---------------------------------------------------------
+# START APP
+# ---------------------------------------------------------
+
 if __name__ == "__main__":
+
     init_db()
 
     app.run(
