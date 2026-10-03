@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="top-row">
+
+    <div>
+        <h2>My Dispatches</h2>
+
+        <p class="muted">
+            Loads assigned to {{ session["name"] }}.
+        </p>
+    </div>
+
+</div>
+
+
+{% for d in dispatches %}
+
+<div class="card">
+
+    <div class="top-row">
+
+        <div>
+
+            <h3>
+                Unit {{ d.unit_number or "N/A" }}
+            </h3>
+
+            <p class="muted">
+                Status: <strong>{{ d.status }}</strong>
+            </p>
+
+        </div>
+
+    </div>
+
+
+    <h3>Pickup Information</h3>
+
+    {% if d.pickup_company %}
+    <p>
+        <strong>Company:</strong>
+        {{ d.pickup_company }}
+    </p>
+    {% endif %}
+
+    <p>
+        <strong>Address:</strong><br>
+        {{ d.pickup_address }}
+    </p>
+
+    {% if d.pickup_contact %}
+    <p>
+        <strong>Contact:</strong>
+        {{ d.pickup_contact }}
+    </p>
+    {% endif %}
+
+    {% if d.pickup_phone %}
+    <p>
+        <strong>Phone:</strong>
+        <a href="tel:{{ d.pickup_phone }}">
+            {{ d.pickup_phone }}
+        </a>
+    </p>
+    {% endif %}
+
+    {% if d.pickup_datetime %}
+    <p>
+        <strong>Pickup Date / Time:</strong>
+        {{ d.pickup_datetime }}
+    </p>
+    {% endif %}
+
+
+    <hr style="margin:25px 0;">
+
+
+    <h3>Delivery Information</h3>
+
+    {% if d.delivery_company %}
+    <p>
+        <strong>Company:</strong>
+        {{ d.delivery_company }}
+    </p>
+    {% endif %}
+
+    <p>
+        <strong>Address:</strong><br>
+        {{ d.delivery_address }}
+    </p>
+
+    {% if d.delivery_contact %}
+    <p>
+        <strong>Contact:</strong>
+        {{ d.delivery_contact }}
+    </p>
+    {% endif %}
+
+    {% if d.delivery_phone %}
+    <p>
+        <strong>Phone:</strong>
+        <a href="tel:{{ d.delivery_phone }}">
+            {{ d.delivery_phone }}
+        </a>
+    </p>
+    {% endif %}
+
+    {% if d.delivery_datetime %}
+    <p>
+        <strong>Delivery Date / Time:</strong>
+        {{ d.delivery_datetime }}
+    </p>
+    {% endif %}
+
+
+    <hr style="margin:25px 0;">
+
+
+    <h3>Vehicle Information</h3>
+
+    {% if d.unit_number %}
+    <p>
+        <strong>Unit Number:</strong>
+        {{ d.unit_number }}
+    </p>
+    {% endif %}
+
+    {% if d.vin %}
+    <p>
+        <strong>VIN:</strong>
+        {{ d.vin }}
+    </p>
+    {% endif %}
+
+    {% if d.truck_type %}
+    <p>
+        <strong>Truck Type:</strong>
+        {{ d.truck_type }}
+    </p>
+    {% endif %}
+
+
+    {% if d.instructions %}
+
+    <hr style="margin:25px 0;">
+
+    <h3>Special Instructions</h3>
+
+    <p style="white-space:pre-line;">
+        {{ d.instructions }}
+    </p>
+
+    {% endif %}
+
+
+    <hr style="margin:25px 0;">
+
+
+    <h3>Update Status</h3>
+
+    {% if d.status == "Assigned" %}
+
+    <form
+        method="post"
+        action="{{ url_for('update_dispatch_status', dispatch_id=d.id) }}"
+    >
+
+        <input
+            type="hidden"
+            name="status"
+            value="Picked Up"
+        >
+
+        <button type="submit">
+            Mark as Picked Up
+        </button>
+
+    </form>
+
+    {% elif d.status == "Picked Up" %}
+
+    <form
+        method="post"
+        action="{{ url_for('update_dispatch_status', dispatch_id=d.id) }}"
+    >
+
+        <input
+            type="hidden"
+            name="status"
+            value="Delivered"
+        >
+
+        <button type="submit">
+            Mark as Delivered
+        </button>
+
+    </form>
+
+    {% elif d.status == "Delivered" %}
+
+    <p>
+        <strong>
+            Delivered
+        </strong>
+    </p>
+
+    {% endif %}
+
+</div>
+
+
+{% else %}
+
+<div class="card">
+
+    <h3>No Dispatches</h3>
+
+    <p>
+        You do not have any assigned dispatches right now.
+    </p>
+
+</div>
+
+{% endfor %}
+
+
+<div style="margin-top:20px;">
+
+    <a
+        class="button-link"
+        href="{{ url_for('driver_dashboard') }}"
+    >
+        Back to Driver Dashboard
+    </a>
+
+</div>
+
+{% endblock %}
