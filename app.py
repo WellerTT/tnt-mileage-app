@@ -25,9 +25,14 @@ import imagehash
 from datetime import datetime, timedelta, date
 from io import BytesIO
 from decimal import Decimal, InvalidOperation
+
 import hashlib
 import os
 
+
+# =========================================================
+# APP SETUP
+# =========================================================
 
 app = Flask(__name__)
 
@@ -38,18 +43,16 @@ app.secret_key = os.environ.get(
     "change-this-secret-key"
 )
 
-# Maximum receipt upload size = 10 MB
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# Cloudinary reads CLOUDINARY_URL from Render
 cloudinary.config(secure=True)
 
 
-# ---------------------------------------------------------
+# =========================================================
 # DATABASE CONNECTION
-# ---------------------------------------------------------
+# =========================================================
 
 def get_db():
 
@@ -64,28 +67,37 @@ def get_db():
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # DATABASE SETUP
-# ---------------------------------------------------------
+# =========================================================
 
 def init_db():
 
     conn = get_db()
     cur = conn.cursor()
 
-    # USERS TABLE
+
+    # -----------------------------------------------------
+    # USERS
+    # -----------------------------------------------------
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('admin','driver')),
+            role TEXT NOT NULL
+                CHECK(role IN ('admin','driver')),
             active INTEGER NOT NULL DEFAULT 1
         )
     """)
 
-    # MILEAGE TABLE
+
+    # -----------------------------------------------------
+    # MILEAGE
+    # -----------------------------------------------------
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mileage_entries (
             id SERIAL PRIMARY KEY,
@@ -99,11 +111,16 @@ def init_db():
             total_miles REAL NOT NULL,
             notes TEXT,
             created_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
+            FOREIGN KEY(user_id)
+                REFERENCES users(id)
         )
     """)
 
-    # REIMBURSEMENTS TABLE
+
+    # -----------------------------------------------------
+    # REIMBURSEMENTS
+    # -----------------------------------------------------
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reimbursements (
             id SERIAL PRIMARY KEY,
@@ -118,34 +135,84 @@ def init_db():
             receipt_phash TEXT,
             status TEXT NOT NULL DEFAULT 'Unpaid',
             created_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
+            FOREIGN KEY(user_id)
+                REFERENCES users(id)
         )
     """)
 
-    # ADD NEW COLUMNS IF TABLE ALREADY EXISTED
+
     cur.execute("""
         ALTER TABLE reimbursements
         ADD COLUMN IF NOT EXISTS receipt_sha256 TEXT
     """)
+
 
     cur.execute("""
         ALTER TABLE reimbursements
         ADD COLUMN IF NOT EXISTS receipt_phash TEXT
     """)
 
-    # INDEX HELPS EXACT DUPLICATE LOOKUPS
+
     cur.execute("""
         CREATE INDEX IF NOT EXISTS
         idx_reimbursements_receipt_sha256
         ON reimbursements(receipt_sha256)
     """)
 
+
+    # -----------------------------------------------------
+    # DISPATCHES
+    # -----------------------------------------------------
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS dispatches (
+
+            id SERIAL PRIMARY KEY,
+
+            user_id INTEGER NOT NULL,
+
+            pickup_company TEXT,
+            pickup_address TEXT NOT NULL,
+            pickup_contact TEXT,
+            pickup_phone TEXT,
+
+            delivery_company TEXT,
+            delivery_address TEXT NOT NULL,
+            delivery_contact TEXT,
+            delivery_phone TEXT,
+
+            unit_number TEXT,
+            vin TEXT,
+            truck_type TEXT,
+
+            pickup_datetime TEXT,
+            delivery_datetime TEXT,
+
+            instructions TEXT,
+
+            status TEXT NOT NULL
+                DEFAULT 'Assigned',
+
+            created_at TEXT NOT NULL,
+
+            FOREIGN KEY(user_id)
+                REFERENCES users(id)
+        )
+    """)
+
+
     conn.commit()
 
-    # CHECK FOR ADMIN
+
+    # -----------------------------------------------------
+    # ADMIN ACCOUNT
+    # -----------------------------------------------------
+
     cur.execute(
         """
-        SELECT id, password_hash
+        SELECT
+            id,
+            password_hash
         FROM users
         WHERE role=%s
         LIMIT 1
@@ -159,7 +226,7 @@ def init_db():
         "ADMIN_PASSWORD"
     )
 
-    # CREATE ADMIN IF NEEDED
+
     if not admin:
 
         cur.execute(
@@ -170,7 +237,12 @@ def init_db():
                 password_hash,
                 role
             )
-            VALUES (%s, %s, %s, %s)
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s
+            )
             """,
             (
                 "TNT Admin",
@@ -185,7 +257,7 @@ def init_db():
 
         conn.commit()
 
-    # UPDATE ADMIN PASSWORD IF NEEDED
+
     elif admin_password:
 
         if not check_password_hash(
@@ -208,6 +280,7 @@ def init_db():
 
             conn.commit()
 
+
     cur.close()
     conn.close()
 
@@ -218,9 +291,9 @@ def setup():
     init_db()
 
 
-# ---------------------------------------------------------
-# LOGIN HELPER
-# ---------------------------------------------------------
+# =========================================================
+# LOGIN CHECK
+# =========================================================
 
 def require_login(role=None):
 
@@ -233,20 +306,18 @@ def require_login(role=None):
     return True
 
 
-# ---------------------------------------------------------
-# RECEIPT IMAGE FINGERPRINT HELPERS
-# ---------------------------------------------------------
+# =========================================================
+# RECEIPT DUPLICATE SCANNER
+# =========================================================
 
 def create_receipt_fingerprints(
     receipt_bytes
 ):
 
-    # EXACT FILE FINGERPRINT
     sha256_hash = hashlib.sha256(
         receipt_bytes
     ).hexdigest()
 
-    # VISUAL / PERCEPTUAL FINGERPRINT
     perceptual_hash = None
 
     try:
@@ -255,8 +326,6 @@ def create_receipt_fingerprints(
             BytesIO(receipt_bytes)
         )
 
-        # Correct photos that were rotated
-        # using EXIF information.
         image = ImageOps.exif_transpose(
             image
         )
@@ -269,9 +338,6 @@ def create_receipt_fingerprints(
 
     except Exception as e:
 
-        # Exact duplicate detection still works
-        # even if this particular image format
-        # cannot be perceptually hashed.
         app.logger.warning(
             "Could not create perceptual hash: %s",
             e
@@ -284,7 +350,6 @@ def create_receipt_fingerprints(
 
 
 def find_duplicate_receipt(
-    user_id,
     sha256_hash,
     perceptual_hash
 ):
@@ -292,8 +357,9 @@ def find_duplicate_receipt(
     conn = get_db()
     cur = conn.cursor()
 
+
     # -----------------------------------------------------
-    # EXACT IMAGE DUPLICATE
+    # EXACT DUPLICATE
     # -----------------------------------------------------
 
     cur.execute(
@@ -317,6 +383,7 @@ def find_duplicate_receipt(
 
     exact_duplicate = cur.fetchone()
 
+
     if exact_duplicate:
 
         cur.close()
@@ -326,6 +393,7 @@ def find_duplicate_receipt(
             "type": "exact",
             "entry": exact_duplicate
         }
+
 
     # -----------------------------------------------------
     # VISUAL DUPLICATE
@@ -346,33 +414,38 @@ def find_duplicate_receipt(
             FROM reimbursements r
             JOIN users u
                 ON u.id = r.user_id
-            WHERE r.receipt_phash IS NOT NULL
+            WHERE r.receipt_phash
+                IS NOT NULL
             """
         )
 
-        previous_receipts = cur.fetchall()
-
-        new_hash = imagehash.hex_to_hash(
-            perceptual_hash
+        previous_receipts = (
+            cur.fetchall()
         )
+
+        new_hash = (
+            imagehash.hex_to_hash(
+                perceptual_hash
+            )
+        )
+
 
         for previous in previous_receipts:
 
             try:
 
-                old_hash = imagehash.hex_to_hash(
-                    previous[
-                        "receipt_phash"
-                    ]
+                old_hash = (
+                    imagehash.hex_to_hash(
+                        previous[
+                            "receipt_phash"
+                        ]
+                    )
                 )
 
-                # Lower number = more visually similar.
-                #
-                # 0 = visually identical.
-                # 1-4 = extremely close match.
                 distance = (
                     new_hash - old_hash
                 )
+
 
                 if distance <= 4:
 
@@ -389,15 +462,16 @@ def find_duplicate_receipt(
 
                 continue
 
+
     cur.close()
     conn.close()
 
     return None
 
 
-# ---------------------------------------------------------
+# =========================================================
 # LOGIN
-# ---------------------------------------------------------
+# =========================================================
 
 @app.route(
     "/",
@@ -424,6 +498,7 @@ def login():
             )
         )
 
+
     if request.method == "POST":
 
         username = request.form[
@@ -440,8 +515,10 @@ def login():
             ) == "yes"
         )
 
+
         conn = get_db()
         cur = conn.cursor()
+
 
         cur.execute(
             """
@@ -457,8 +534,10 @@ def login():
 
         user = cur.fetchone()
 
+
         cur.close()
         conn.close()
+
 
         if user and check_password_hash(
             user["password_hash"],
@@ -483,6 +562,7 @@ def login():
                 user["role"]
             )
 
+
             if user["role"] == "admin":
 
                 return redirect(
@@ -491,25 +571,28 @@ def login():
                     )
                 )
 
+
             return redirect(
                 url_for(
                     "driver_dashboard"
                 )
             )
 
+
         flash(
             "Invalid username or password.",
             "error"
         )
+
 
     return render_template(
         "login.html"
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # FORGOT PASSWORD
-# ---------------------------------------------------------
+# =========================================================
 
 @app.route(
     "/forgot-password",
@@ -523,8 +606,10 @@ def forgot_password():
             "username"
         ].strip()
 
+
         conn = get_db()
         cur = conn.cursor()
+
 
         cur.execute(
             """
@@ -540,8 +625,10 @@ def forgot_password():
 
         user = cur.fetchone()
 
+
         cur.close()
         conn.close()
+
 
         if user:
 
@@ -559,14 +646,15 @@ def forgot_password():
                 "error"
             )
 
+
     return render_template(
         "forgot_password.html"
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # LOGOUT
-# ---------------------------------------------------------
+# =========================================================
 
 @app.route("/logout")
 def logout():
@@ -578,9 +666,9 @@ def logout():
     )
 
 
-# ---------------------------------------------------------
-# DRIVER MILEAGE DASHBOARD
-# ---------------------------------------------------------
+# =========================================================
+# DRIVER MILEAGE
+# =========================================================
 
 @app.route(
     "/driver",
@@ -596,8 +684,10 @@ def driver_dashboard():
             url_for("login")
         )
 
+
     conn = get_db()
     cur = conn.cursor()
+
 
     if request.method == "POST":
 
@@ -605,25 +695,30 @@ def driver_dashboard():
             "trip_date"
         ]
 
+
         unit_number = request.form.get(
             "unit_number",
             ""
         ).strip()
+
 
         pickup_city = request.form.get(
             "pickup_city",
             ""
         ).strip()
 
+
         delivery_city = request.form.get(
             "delivery_city",
             ""
         ).strip()
 
+
         notes = request.form.get(
             "notes",
             ""
         ).strip()
+
 
         try:
 
@@ -655,6 +750,7 @@ def driver_dashboard():
                 )
             )
 
+
         if ending < beginning:
 
             cur.close()
@@ -671,13 +767,16 @@ def driver_dashboard():
                 )
             )
 
+
         total = (
             ending - beginning
         )
 
+
         cur.execute(
             """
             INSERT INTO mileage_entries (
+
                 user_id,
                 trip_date,
                 unit_number,
@@ -688,10 +787,22 @@ def driver_dashboard():
                 total_miles,
                 notes,
                 created_at
+
             )
+
             VALUES (
-                %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s
+
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s
+
             )
             """,
             (
@@ -712,13 +823,16 @@ def driver_dashboard():
             )
         )
 
+
         conn.commit()
+
 
         flash(
             f"Mileage submitted: "
             f"{total:,.1f} miles.",
             "success"
         )
+
 
     cur.execute(
         """
@@ -736,7 +850,9 @@ def driver_dashboard():
         )
     )
 
+
     entries = cur.fetchall()
+
 
     cur.execute(
         """
@@ -745,7 +861,9 @@ def driver_dashboard():
                 SUM(total_miles),
                 0
             ) AS total
+
         FROM mileage_entries
+
         WHERE user_id=%s
         """,
         (
@@ -755,14 +873,19 @@ def driver_dashboard():
         )
     )
 
+
     total_row = cur.fetchone()
 
     total_miles = (
-        total_row["total"]
+        total_row[
+            "total"
+        ]
     )
+
 
     cur.close()
     conn.close()
+
 
     return render_template(
         "driver.html",
@@ -771,9 +894,9 @@ def driver_dashboard():
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # DRIVER REIMBURSEMENTS
-# ---------------------------------------------------------
+# =========================================================
 
 @app.route(
     "/reimbursements",
@@ -789,6 +912,7 @@ def reimbursements():
             url_for("login")
         )
 
+
     if request.method == "POST":
 
         expense_date = request.form.get(
@@ -796,24 +920,29 @@ def reimbursements():
             ""
         ).strip()
 
+
         expense_type = request.form.get(
             "expense_type",
             ""
         ).strip()
+
 
         amount_text = request.form.get(
             "amount",
             ""
         ).strip()
 
+
         notes = request.form.get(
             "notes",
             ""
         ).strip()
 
+
         receipt = request.files.get(
             "receipt"
         )
+
 
         # -------------------------------------------------
         # REQUIRED FIELDS
@@ -832,6 +961,7 @@ def reimbursements():
                 )
             )
 
+
         if not expense_type:
 
             flash(
@@ -845,8 +975,9 @@ def reimbursements():
                 )
             )
 
+
         # -------------------------------------------------
-        # AMOUNT VALIDATION
+        # AMOUNT
         # -------------------------------------------------
 
         try:
@@ -873,6 +1004,7 @@ def reimbursements():
                 )
             )
 
+
         if amount <= 0:
 
             flash(
@@ -886,8 +1018,9 @@ def reimbursements():
                 )
             )
 
+
         # -------------------------------------------------
-        # EXPENSE DATE
+        # DATE VALIDATION
         # -------------------------------------------------
 
         try:
@@ -912,7 +1045,9 @@ def reimbursements():
                 )
             )
 
+
         today = date.today()
+
 
         if (
             submitted_expense_date
@@ -930,14 +1065,16 @@ def reimbursements():
                 )
             )
 
+
         # -------------------------------------------------
-        # 7-DAY SUBMISSION LIMIT
+        # 7 DAY RULE
         # -------------------------------------------------
 
         oldest_allowed_date = (
             today
             - timedelta(days=7)
         )
+
 
         if (
             submitted_expense_date
@@ -956,22 +1093,30 @@ def reimbursements():
                 )
             )
 
+
         # -------------------------------------------------
-        # BASIC DUPLICATE CHECK
-        # SAME DRIVER / DATE / TYPE / AMOUNT
+        # SAME DATE / TYPE / AMOUNT CHECK
         # -------------------------------------------------
 
         conn = get_db()
         cur = conn.cursor()
 
+
         cur.execute(
             """
             SELECT id
             FROM reimbursements
+
             WHERE user_id=%s
-              AND expense_date=%s
-              AND LOWER(expense_type)=LOWER(%s)
-              AND amount=%s
+
+            AND expense_date=%s
+
+            AND LOWER(
+                expense_type
+            )=LOWER(%s)
+
+            AND amount=%s
+
             LIMIT 1
             """,
             (
@@ -984,10 +1129,13 @@ def reimbursements():
             )
         )
 
+
         duplicate = cur.fetchone()
+
 
         cur.close()
         conn.close()
+
 
         if duplicate:
 
@@ -1003,8 +1151,9 @@ def reimbursements():
                 )
             )
 
+
         # -------------------------------------------------
-        # RECEIPT VALIDATION
+        # RECEIPT
         # -------------------------------------------------
 
         if (
@@ -1023,6 +1172,7 @@ def reimbursements():
                 )
             )
 
+
         if not receipt.mimetype.startswith(
             "image/"
         ):
@@ -1038,9 +1188,6 @@ def reimbursements():
                 )
             )
 
-        # -------------------------------------------------
-        # READ RECEIPT IMAGE
-        # -------------------------------------------------
 
         try:
 
@@ -1061,6 +1208,7 @@ def reimbursements():
                 )
             )
 
+
         if not receipt_bytes:
 
             flash(
@@ -1074,8 +1222,9 @@ def reimbursements():
                 )
             )
 
+
         # -------------------------------------------------
-        # CREATE IMAGE FINGERPRINTS
+        # RECEIPT FINGERPRINT
         # -------------------------------------------------
 
         (
@@ -1085,27 +1234,22 @@ def reimbursements():
             receipt_bytes
         )
 
-        # -------------------------------------------------
-        # IMAGE DUPLICATE CHECK
-        # CHECKS ALL PREVIOUS RECEIPTS
-        # -------------------------------------------------
 
         image_duplicate = (
             find_duplicate_receipt(
-                session[
-                    "user_id"
-                ],
                 receipt_sha256,
                 receipt_phash
             )
         )
+
 
         if image_duplicate:
 
             if (
                 image_duplicate[
                     "type"
-                ] == "exact"
+                ]
+                == "exact"
             ):
 
                 flash(
@@ -1124,19 +1268,18 @@ def reimbursements():
                     "error"
                 )
 
+
             return redirect(
                 url_for(
                     "reimbursements"
                 )
             )
 
+
         uploaded_public_id = None
 
-        try:
 
-            # -------------------------------------------------
-            # UPLOAD TO CLOUDINARY
-            # -------------------------------------------------
+        try:
 
             receipt_file = BytesIO(
                 receipt_bytes
@@ -1146,6 +1289,7 @@ def reimbursements():
                 receipt.filename
                 or "receipt.jpg"
             )
+
 
             upload_result = (
                 cloudinary.uploader.upload(
@@ -1158,11 +1302,13 @@ def reimbursements():
                 )
             )
 
+
             receipt_url = (
                 upload_result[
                     "secure_url"
                 ]
             )
+
 
             uploaded_public_id = (
                 upload_result[
@@ -1170,15 +1316,15 @@ def reimbursements():
                 ]
             )
 
-            # -------------------------------------------------
-            # SAVE TO DATABASE
-            # -------------------------------------------------
 
             conn = get_db()
             cur = conn.cursor()
 
-            # SECOND EXACT DUPLICATE CHECK
-            # HELPS PREVENT RAPID DOUBLE SUBMISSIONS
+
+            # ---------------------------------------------
+            # EXACT CHECK AGAIN
+            # ---------------------------------------------
+
             cur.execute(
                 """
                 SELECT id
@@ -1191,14 +1337,17 @@ def reimbursements():
                 )
             )
 
+
             duplicate_after_upload = (
                 cur.fetchone()
             )
+
 
             if duplicate_after_upload:
 
                 cur.close()
                 conn.close()
+
 
                 try:
 
@@ -1210,11 +1359,13 @@ def reimbursements():
 
                     pass
 
+
                 flash(
                     "Duplicate receipt detected. "
                     "This receipt has already been submitted.",
                     "error"
                 )
+
 
                 return redirect(
                     url_for(
@@ -1222,9 +1373,11 @@ def reimbursements():
                     )
                 )
 
+
             cur.execute(
                 """
                 INSERT INTO reimbursements (
+
                     user_id,
                     expense_date,
                     expense_type,
@@ -1236,11 +1389,23 @@ def reimbursements():
                     receipt_phash,
                     status,
                     created_at
+
                 )
+
                 VALUES (
-                    %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s,
+
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
                     %s
+
                 )
                 """,
                 (
@@ -1262,21 +1427,26 @@ def reimbursements():
                 )
             )
 
+
             conn.commit()
+
 
             cur.close()
             conn.close()
+
 
             flash(
                 "Reimbursement submitted successfully.",
                 "success"
             )
 
+
             return redirect(
                 url_for(
                     "reimbursements"
                 )
             )
+
 
         except Exception:
 
@@ -1292,9 +1462,11 @@ def reimbursements():
 
                     pass
 
+
             app.logger.exception(
                 "REIMBURSEMENT UPLOAD FAILED"
             )
+
 
             flash(
                 "There was a problem uploading your reimbursement. "
@@ -1302,24 +1474,29 @@ def reimbursements():
                 "error"
             )
 
+
             return redirect(
                 url_for(
                     "reimbursements"
                 )
             )
 
+
     # -----------------------------------------------------
-    # DRIVER'S REIMBURSEMENT HISTORY
+    # DRIVER REIMBURSEMENT HISTORY
     # -----------------------------------------------------
 
     conn = get_db()
     cur = conn.cursor()
 
+
     cur.execute(
         """
         SELECT *
         FROM reimbursements
+
         WHERE user_id=%s
+
         ORDER BY
             expense_date DESC,
             id DESC
@@ -1331,12 +1508,15 @@ def reimbursements():
         )
     )
 
+
     reimbursement_entries = (
         cur.fetchall()
     )
 
+
     cur.close()
     conn.close()
+
 
     return render_template(
         "reimbursements.html",
@@ -1346,9 +1526,171 @@ def reimbursements():
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
+# DRIVER DISPATCHES
+# =========================================================
+
+@app.route(
+    "/dispatches"
+)
+def driver_dispatches():
+
+    if not require_login(
+        "driver"
+    ):
+
+        return redirect(
+            url_for("login")
+        )
+
+
+    conn = get_db()
+    cur = conn.cursor()
+
+
+    cur.execute(
+        """
+        SELECT *
+        FROM dispatches
+
+        WHERE user_id=%s
+
+        ORDER BY
+            CASE status
+                WHEN 'Assigned' THEN 1
+                WHEN 'Picked Up' THEN 2
+                WHEN 'Delivered' THEN 3
+                ELSE 4
+            END,
+            id DESC
+        """,
+        (
+            session[
+                "user_id"
+            ],
+        )
+    )
+
+
+    dispatches = cur.fetchall()
+
+
+    cur.close()
+    conn.close()
+
+
+    return render_template(
+        "dispatches.html",
+        dispatches=dispatches
+    )
+
+
+# =========================================================
+# DRIVER UPDATE DISPATCH STATUS
+# =========================================================
+
+@app.route(
+    "/dispatch/<int:dispatch_id>/status",
+    methods=["POST"]
+)
+def update_dispatch_status(
+    dispatch_id
+):
+
+    if not require_login(
+        "driver"
+    ):
+
+        return redirect(
+            url_for("login")
+        )
+
+
+    new_status = request.form.get(
+        "status",
+        ""
+    )
+
+
+    allowed_statuses = [
+        "Assigned",
+        "Picked Up",
+        "Delivered"
+    ]
+
+
+    if new_status not in allowed_statuses:
+
+        flash(
+            "Invalid dispatch status.",
+            "error"
+        )
+
+        return redirect(
+            url_for(
+                "driver_dispatches"
+            )
+        )
+
+
+    conn = get_db()
+    cur = conn.cursor()
+
+
+    cur.execute(
+        """
+        UPDATE dispatches
+
+        SET status=%s
+
+        WHERE id=%s
+
+        AND user_id=%s
+        """,
+        (
+            new_status,
+            dispatch_id,
+            session[
+                "user_id"
+            ]
+        )
+    )
+
+
+    updated = cur.rowcount
+
+    conn.commit()
+
+
+    cur.close()
+    conn.close()
+
+
+    if updated:
+
+        flash(
+            f"Dispatch marked {new_status}.",
+            "success"
+        )
+
+    else:
+
+        flash(
+            "Dispatch was not found.",
+            "error"
+        )
+
+
+    return redirect(
+        url_for(
+            "driver_dispatches"
+        )
+    )
+
+
+# =========================================================
 # ADMIN DASHBOARD
-# ---------------------------------------------------------
+# =========================================================
 
 @app.route("/admin")
 def admin_dashboard():
@@ -1361,51 +1703,69 @@ def admin_dashboard():
             url_for("login")
         )
 
+
     conn = get_db()
     cur = conn.cursor()
+
 
     cur.execute("""
         SELECT
             m.*,
             u.name AS driver_name,
             u.username
+
         FROM mileage_entries m
+
         JOIN users u
             ON u.id = m.user_id
+
         ORDER BY
             m.trip_date DESC,
             m.id DESC
     """)
 
+
     entries = cur.fetchall()
+
 
     cur.execute("""
         SELECT
+
             u.id,
             u.name,
             u.username,
+
             COALESCE(
                 SUM(m.total_miles),
                 0
             ) AS total_miles,
-            COUNT(m.id) AS entry_count
+
+            COUNT(m.id)
+                AS entry_count
+
         FROM users u
+
         LEFT JOIN mileage_entries m
             ON m.user_id = u.id
+
         WHERE
             u.role='driver'
             AND u.active=1
+
         GROUP BY
             u.id,
             u.name,
             u.username
+
         ORDER BY
             u.name
     """)
 
+
     driver_totals = (
         cur.fetchall()
     )
+
 
     cur.execute("""
         SELECT
@@ -1413,12 +1773,15 @@ def admin_dashboard():
                 SUM(total_miles),
                 0
             ) AS total
+
         FROM mileage_entries
     """)
+
 
     grand_total_row = (
         cur.fetchone()
     )
+
 
     grand_total = (
         grand_total_row[
@@ -1426,8 +1789,10 @@ def admin_dashboard():
         ]
     )
 
+
     cur.close()
     conn.close()
+
 
     return render_template(
         "admin.html",
@@ -1437,15 +1802,17 @@ def admin_dashboard():
     )
 
 
-# ---------------------------------------------------------
-# DELETE MILEAGE ENTRY
-# ---------------------------------------------------------
+# =========================================================
+# DELETE MILEAGE
+# =========================================================
 
 @app.route(
     "/admin/delete-entry/<int:entry_id>",
     methods=["POST"]
 )
-def delete_entry(entry_id):
+def delete_entry(
+    entry_id
+):
 
     if not require_login(
         "admin"
@@ -1455,8 +1822,10 @@ def delete_entry(entry_id):
             url_for("login")
         )
 
+
     conn = get_db()
     cur = conn.cursor()
+
 
     cur.execute(
         """
@@ -1468,12 +1837,16 @@ def delete_entry(entry_id):
         )
     )
 
+
     deleted = cur.rowcount
+
 
     conn.commit()
 
+
     cur.close()
     conn.close()
+
 
     if deleted:
 
@@ -1489,6 +1862,7 @@ def delete_entry(entry_id):
             "error"
         )
 
+
     return redirect(
         url_for(
             "admin_dashboard"
@@ -1496,9 +1870,9 @@ def delete_entry(entry_id):
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # ADMIN REIMBURSEMENTS
-# ---------------------------------------------------------
+# =========================================================
 
 @app.route(
     "/admin/reimbursements"
@@ -1513,26 +1887,33 @@ def admin_reimbursements():
             url_for("login")
         )
 
+
     conn = get_db()
     cur = conn.cursor()
+
 
     cur.execute("""
         SELECT
             r.*,
             u.name AS driver_name,
             u.username
+
         FROM reimbursements r
+
         JOIN users u
             ON u.id = r.user_id
+
         ORDER BY
             u.name ASC,
             r.expense_date DESC,
             r.id DESC
     """)
 
+
     reimbursement_entries = (
         cur.fetchall()
     )
+
 
     cur.execute("""
         SELECT
@@ -1540,13 +1921,17 @@ def admin_reimbursements():
                 SUM(amount),
                 0
             ) AS total
+
         FROM reimbursements
+
         WHERE status='Unpaid'
     """)
+
 
     unpaid_row = (
         cur.fetchone()
     )
+
 
     unpaid_total = (
         unpaid_row[
@@ -1554,8 +1939,10 @@ def admin_reimbursements():
         ]
     )
 
+
     cur.close()
     conn.close()
+
 
     return render_template(
         "admin_reimbursements.html",
@@ -1566,9 +1953,9 @@ def admin_reimbursements():
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # UPDATE REIMBURSEMENT STATUS
-# ---------------------------------------------------------
+# =========================================================
 
 @app.route(
     "/admin/reimbursement/"
@@ -1587,10 +1974,12 @@ def update_reimbursement_status(
             url_for("login")
         )
 
+
     status = request.form.get(
         "status",
         "Unpaid"
     )
+
 
     if status not in [
         "Paid",
@@ -1599,13 +1988,17 @@ def update_reimbursement_status(
 
         status = "Unpaid"
 
+
     conn = get_db()
     cur = conn.cursor()
+
 
     cur.execute(
         """
         UPDATE reimbursements
+
         SET status=%s
+
         WHERE id=%s
         """,
         (
@@ -1614,15 +2007,19 @@ def update_reimbursement_status(
         )
     )
 
+
     conn.commit()
+
 
     cur.close()
     conn.close()
+
 
     flash(
         f"Reimbursement marked {status}.",
         "success"
     )
+
 
     return redirect(
         url_for(
@@ -1631,9 +2028,9 @@ def update_reimbursement_status(
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # DELETE REIMBURSEMENT
-# ---------------------------------------------------------
+# =========================================================
 
 @app.route(
     "/admin/delete-reimbursement/"
@@ -1652,8 +2049,10 @@ def delete_reimbursement(
             url_for("login")
         )
 
+
     conn = get_db()
     cur = conn.cursor()
+
 
     cur.execute(
         """
@@ -1666,19 +2065,23 @@ def delete_reimbursement(
         )
     )
 
+
     reimbursement = (
         cur.fetchone()
     )
+
 
     if not reimbursement:
 
         cur.close()
         conn.close()
 
+
         flash(
             "Reimbursement was not found.",
             "error"
         )
+
 
         return redirect(
             url_for(
@@ -1686,9 +2089,11 @@ def delete_reimbursement(
             )
         )
 
+
     public_id = reimbursement[
         "receipt_public_id"
     ]
+
 
     cur.execute(
         """
@@ -1700,10 +2105,13 @@ def delete_reimbursement(
         )
     )
 
+
     conn.commit()
+
 
     cur.close()
     conn.close()
+
 
     if public_id:
 
@@ -1720,10 +2128,12 @@ def delete_reimbursement(
                 e
             )
 
+
     flash(
         "Reimbursement deleted.",
         "success"
     )
+
 
     return redirect(
         url_for(
@@ -1732,9 +2142,458 @@ def delete_reimbursement(
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
+# ADMIN DISPATCHES
+# =========================================================
+
+@app.route(
+    "/admin/dispatches",
+    methods=["GET", "POST"]
+)
+def admin_dispatches():
+
+    if not require_login(
+        "admin"
+    ):
+
+        return redirect(
+            url_for("login")
+        )
+
+
+    # -----------------------------------------------------
+    # CREATE DISPATCH
+    # -----------------------------------------------------
+
+    if request.method == "POST":
+
+        driver_id = request.form.get(
+            "driver_id"
+        )
+
+
+        pickup_company = request.form.get(
+            "pickup_company",
+            ""
+        ).strip()
+
+
+        pickup_address = request.form.get(
+            "pickup_address",
+            ""
+        ).strip()
+
+
+        pickup_contact = request.form.get(
+            "pickup_contact",
+            ""
+        ).strip()
+
+
+        pickup_phone = request.form.get(
+            "pickup_phone",
+            ""
+        ).strip()
+
+
+        delivery_company = request.form.get(
+            "delivery_company",
+            ""
+        ).strip()
+
+
+        delivery_address = request.form.get(
+            "delivery_address",
+            ""
+        ).strip()
+
+
+        delivery_contact = request.form.get(
+            "delivery_contact",
+            ""
+        ).strip()
+
+
+        delivery_phone = request.form.get(
+            "delivery_phone",
+            ""
+        ).strip()
+
+
+        unit_number = request.form.get(
+            "unit_number",
+            ""
+        ).strip()
+
+
+        vin = request.form.get(
+            "vin",
+            ""
+        ).strip()
+
+
+        truck_type = request.form.get(
+            "truck_type",
+            ""
+        ).strip()
+
+
+        pickup_datetime = request.form.get(
+            "pickup_datetime",
+            ""
+        ).strip()
+
+
+        delivery_datetime = request.form.get(
+            "delivery_datetime",
+            ""
+        ).strip()
+
+
+        instructions = request.form.get(
+            "instructions",
+            ""
+        ).strip()
+
+
+        if not driver_id:
+
+            flash(
+                "Please select a contractor.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "admin_dispatches"
+                )
+            )
+
+
+        if not pickup_address:
+
+            flash(
+                "Pickup address is required.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "admin_dispatches"
+                )
+            )
+
+
+        if not delivery_address:
+
+            flash(
+                "Delivery address is required.",
+                "error"
+            )
+
+            return redirect(
+                url_for(
+                    "admin_dispatches"
+                )
+            )
+
+
+        conn = get_db()
+        cur = conn.cursor()
+
+
+        # MAKE SURE DRIVER EXISTS
+        cur.execute(
+            """
+            SELECT id
+            FROM users
+
+            WHERE id=%s
+
+            AND role='driver'
+
+            AND active=1
+            """,
+            (
+                driver_id,
+            )
+        )
+
+
+        driver = cur.fetchone()
+
+
+        if not driver:
+
+            cur.close()
+            conn.close()
+
+
+            flash(
+                "That contractor could not be found.",
+                "error"
+            )
+
+
+            return redirect(
+                url_for(
+                    "admin_dispatches"
+                )
+            )
+
+
+        cur.execute(
+            """
+            INSERT INTO dispatches (
+
+                user_id,
+
+                pickup_company,
+                pickup_address,
+                pickup_contact,
+                pickup_phone,
+
+                delivery_company,
+                delivery_address,
+                delivery_contact,
+                delivery_phone,
+
+                unit_number,
+                vin,
+                truck_type,
+
+                pickup_datetime,
+                delivery_datetime,
+
+                instructions,
+
+                status,
+                created_at
+
+            )
+
+            VALUES (
+
+                %s,
+
+                %s,
+                %s,
+                %s,
+                %s,
+
+                %s,
+                %s,
+                %s,
+                %s,
+
+                %s,
+                %s,
+                %s,
+
+                %s,
+                %s,
+
+                %s,
+
+                %s,
+                %s
+
+            )
+            """,
+            (
+                driver_id,
+
+                pickup_company,
+                pickup_address,
+                pickup_contact,
+                pickup_phone,
+
+                delivery_company,
+                delivery_address,
+                delivery_contact,
+                delivery_phone,
+
+                unit_number,
+                vin,
+                truck_type,
+
+                pickup_datetime,
+                delivery_datetime,
+
+                instructions,
+
+                "Assigned",
+
+                datetime.now().isoformat(
+                    timespec="seconds"
+                )
+            )
+        )
+
+
+        conn.commit()
+
+
+        cur.close()
+        conn.close()
+
+
+        flash(
+            "Dispatch sent to contractor.",
+            "success"
+        )
+
+
+        return redirect(
+            url_for(
+                "admin_dispatches"
+            )
+        )
+
+
+    # -----------------------------------------------------
+    # GET DRIVERS + ALL DISPATCHES
+    # -----------------------------------------------------
+
+    conn = get_db()
+    cur = conn.cursor()
+
+
+    cur.execute(
+        """
+        SELECT
+            id,
+            name,
+            username
+
+        FROM users
+
+        WHERE role='driver'
+
+        AND active=1
+
+        ORDER BY name
+        """
+    )
+
+
+    drivers = cur.fetchall()
+
+
+    cur.execute(
+        """
+        SELECT
+            d.*,
+            u.name AS driver_name,
+            u.username
+
+        FROM dispatches d
+
+        JOIN users u
+            ON u.id = d.user_id
+
+        ORDER BY
+            CASE d.status
+                WHEN 'Assigned'
+                    THEN 1
+                WHEN 'Picked Up'
+                    THEN 2
+                WHEN 'Delivered'
+                    THEN 3
+                ELSE 4
+            END,
+
+            d.id DESC
+        """
+    )
+
+
+    dispatches = cur.fetchall()
+
+
+    cur.close()
+    conn.close()
+
+
+    return render_template(
+        "admin_dispatches.html",
+        drivers=drivers,
+        dispatches=dispatches
+    )
+
+
+# =========================================================
+# ADMIN DELETE DISPATCH
+# =========================================================
+
+@app.route(
+    "/admin/delete-dispatch/"
+    "<int:dispatch_id>",
+    methods=["POST"]
+)
+def delete_dispatch(
+    dispatch_id
+):
+
+    if not require_login(
+        "admin"
+    ):
+
+        return redirect(
+            url_for("login")
+        )
+
+
+    conn = get_db()
+    cur = conn.cursor()
+
+
+    cur.execute(
+        """
+        DELETE FROM dispatches
+        WHERE id=%s
+        """,
+        (
+            dispatch_id,
+        )
+    )
+
+
+    deleted = cur.rowcount
+
+
+    conn.commit()
+
+
+    cur.close()
+    conn.close()
+
+
+    if deleted:
+
+        flash(
+            "Dispatch deleted.",
+            "success"
+        )
+
+    else:
+
+        flash(
+            "Dispatch was not found.",
+            "error"
+        )
+
+
+    return redirect(
+        url_for(
+            "admin_dispatches"
+        )
+    )
+
+
+# =========================================================
 # ADD DRIVER
-# ---------------------------------------------------------
+# =========================================================
 
 @app.route(
     "/admin/add-driver",
@@ -1750,19 +2609,23 @@ def add_driver():
             url_for("login")
         )
 
+
     if request.method == "POST":
 
         name = request.form[
             "name"
         ].strip()
 
+
         username = request.form[
             "username"
         ].strip()
 
+
         password = request.form[
             "password"
         ]
+
 
         if (
             not name
@@ -1781,24 +2644,31 @@ def add_driver():
                 )
             )
 
+
         conn = get_db()
         cur = conn.cursor()
+
 
         try:
 
             cur.execute(
                 """
                 INSERT INTO users (
+
                     name,
                     username,
                     password_hash,
                     role
+
                 )
+
                 VALUES (
+
                     %s,
                     %s,
                     %s,
                     'driver'
+
                 )
                 """,
                 (
@@ -1810,26 +2680,32 @@ def add_driver():
                 )
             )
 
+
             conn.commit()
+
 
             flash(
                 f"Driver {name} added.",
                 "success"
             )
 
+
         except psycopg2.IntegrityError:
 
             conn.rollback()
+
 
             flash(
                 "That username already exists.",
                 "error"
             )
 
+
         finally:
 
             cur.close()
             conn.close()
+
 
         return redirect(
             url_for(
@@ -1837,8 +2713,10 @@ def add_driver():
             )
         )
 
+
     conn = get_db()
     cur = conn.cursor()
+
 
     cur.execute("""
         SELECT
@@ -1846,15 +2724,21 @@ def add_driver():
             name,
             username,
             active
+
         FROM users
+
         WHERE role='driver'
+
         ORDER BY name
     """)
 
+
     drivers = cur.fetchall()
+
 
     cur.close()
     conn.close()
+
 
     return render_template(
         "add_driver.html",
@@ -1862,9 +2746,9 @@ def add_driver():
     )
 
 
-# ---------------------------------------------------------
+# =========================================================
 # START APP
-# ---------------------------------------------------------
+# =========================================================
 
 if __name__ == "__main__":
 
