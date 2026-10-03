@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="top-row">
+    <div>
+        <h2>Reimbursements</h2>
+        <p class="muted">
+            Submit your reimbursement and upload a receipt photo.
+        </p>
+    </div>
+</div>
+
+<div class="card">
+
+    <h3>Submit Reimbursement</h3>
+
+    <form method="post" enctype="multipart/form-data">
+
+        <label for="expense_date">Expense Date</label>
+        <input
+            type="date"
+            id="expense_date"
+            name="expense_date"
+            required
+        >
+
+        <label for="expense_type">Expense Type</label>
+        <select
+            id="expense_type"
+            name="expense_type"
+            required
+        >
+            <option value="">Select expense type</option>
+            <option value="Hotel">Hotel</option>
+            <option value="Uber/Lyft">Uber/Lyft</option>
+            <option value="Fuel">Fuel</option>
+            <option value="Flight">Flight</option>
+            <option value="Parking">Parking</option>
+            <option value="Other">Other</option>
+        </select>
+
+        <label for="amount">Amount</label>
+        <input
+            type="number"
+            id="amount"
+            name="amount"
+            step="0.01"
+            min="0.01"
+            placeholder="0.00"
+            required
+        >
+
+        <label for="notes">Notes</label>
+        <textarea
+            id="notes"
+            name="notes"
+            rows="3"
+            placeholder="Add any details about this reimbursement"
+        ></textarea>
+
+        <label for="receipt">Receipt Photo</label>
+        <input
+            type="file"
+            id="receipt"
+            name="receipt"
+            accept="image/*"
+            capture="environment"
+            required
+        >
+
+        <p class="muted">
+            You can take a picture of your receipt or choose one from your phone.
+        </p>
+
+        <button type="submit">
+            Submit Reimbursement
+        </button>
+
+    </form>
+
+</div>
+
+
+<div class="card">
+
+    <h3>My Reimbursements</h3>
+
+    <div class="table-wrap">
+
+        <table style="min-width: 850px;">
+
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th>Notes</th>
+                    <th>Receipt</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+                {% for r in reimbursements %}
+
+                <tr>
+
+                    <td>
+                        {{ r.expense_date }}
+                    </td>
+
+                    <td>
+                        {{ r.expense_type }}
+                    </td>
+
+                    <td>
+                        ${{ "%.2f"|format(r.amount) }}
+                    </td>
+
+                    <td>
+                        {{ r.notes or "" }}
+                    </td>
+
+                    <td>
+                        <a
+                            href="{{ r.receipt_url }}"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                        >
+                            View Receipt
+                        </a>
+                    </td>
+
+                    <td>
+                        <strong>
+                            {{ r.status }}
+                        </strong>
+                    </td>
+
+                </tr>
+
+                {% else %}
+
+                <tr>
+                    <td colspan="6">
+                        No reimbursements submitted yet.
+                    </td>
+                </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+<div style="margin-top: 20px;">
+    <a
+        class="button-link"
+        href="{{ url_for('driver_dashboard') }}"
+    >
+        Back to Mileage
+    </a>
+</div>
+
+{% endblock %}
