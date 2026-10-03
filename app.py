@@ -5,7 +5,8 @@ from flask import (
     redirect,
     url_for,
     session,
-    flash
+    flash,
+    jsonify
 )
 
 from werkzeug.security import (
@@ -140,18 +141,15 @@ def init_db():
         )
     """)
 
-
     cur.execute("""
         ALTER TABLE reimbursements
         ADD COLUMN IF NOT EXISTS receipt_sha256 TEXT
     """)
 
-
     cur.execute("""
         ALTER TABLE reimbursements
         ADD COLUMN IF NOT EXISTS receipt_phash TEXT
     """)
-
 
     cur.execute("""
         CREATE INDEX IF NOT EXISTS
@@ -201,6 +199,45 @@ def init_db():
     """)
 
 
+    # -----------------------------------------------------
+    # SAVED DISPATCH LOCATIONS
+    # -----------------------------------------------------
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS dispatch_locations (
+
+            id SERIAL PRIMARY KEY,
+
+            company_name TEXT NOT NULL,
+            address TEXT NOT NULL,
+
+            contact_name TEXT,
+            phone TEXT,
+
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS
+        idx_dispatch_locations_company
+
+        ON dispatch_locations (
+            LOWER(company_name)
+        )
+    """)
+
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS
+        idx_dispatch_locations_address
+
+        ON dispatch_locations (
+            LOWER(address)
+        )
+    """)
+
+
     conn.commit()
 
 
@@ -213,8 +250,11 @@ def init_db():
         SELECT
             id,
             password_hash
+
         FROM users
+
         WHERE role=%s
+
         LIMIT 1
         """,
         ("admin",)
@@ -237,6 +277,7 @@ def init_db():
                 password_hash,
                 role
             )
+
             VALUES (
                 %s,
                 %s,
@@ -268,7 +309,9 @@ def init_db():
             cur.execute(
                 """
                 UPDATE users
+
                 SET password_hash=%s
+
                 WHERE role='admin'
                 """,
                 (
@@ -304,6 +347,137 @@ def require_login(role=None):
         return False
 
     return True
+
+
+# =========================================================
+# SAVED LOCATION HELPERS
+# =========================================================
+
+def save_dispatch_location(
+    company_name,
+    address,
+    contact_name,
+    phone
+):
+
+    company_name = (
+        company_name or ""
+    ).strip()
+
+    address = (
+        address or ""
+    ).strip()
+
+    contact_name = (
+        contact_name or ""
+    ).strip()
+
+    phone = (
+        phone or ""
+    ).strip()
+
+
+    # We only save it when a company
+    # and address were entered.
+    if not company_name or not address:
+        return
+
+
+    conn = get_db()
+    cur = conn.cursor()
+
+
+    cur.execute(
+        """
+        SELECT id
+
+        FROM dispatch_locations
+
+        WHERE LOWER(company_name)=LOWER(%s)
+
+        AND LOWER(address)=LOWER(%s)
+
+        LIMIT 1
+        """,
+        (
+            company_name,
+            address
+        )
+    )
+
+
+    existing = cur.fetchone()
+
+    now = datetime.now().isoformat(
+        timespec="seconds"
+    )
+
+
+    if existing:
+
+        cur.execute(
+            """
+            UPDATE dispatch_locations
+
+            SET
+                company_name=%s,
+                address=%s,
+                contact_name=%s,
+                phone=%s,
+                updated_at=%s
+
+            WHERE id=%s
+            """,
+            (
+                company_name,
+                address,
+                contact_name,
+                phone,
+                now,
+                existing["id"]
+            )
+        )
+
+
+    else:
+
+        cur.execute(
+            """
+            INSERT INTO dispatch_locations (
+
+                company_name,
+                address,
+                contact_name,
+                phone,
+                created_at,
+                updated_at
+
+            )
+
+            VALUES (
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                %s
+            )
+            """,
+            (
+                company_name,
+                address,
+                contact_name,
+                phone,
+                now,
+                now
+            )
+        )
+
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
 
 
 # =========================================================
@@ -358,10 +532,7 @@ def find_duplicate_receipt(
     cur = conn.cursor()
 
 
-    # -----------------------------------------------------
     # EXACT DUPLICATE
-    # -----------------------------------------------------
-
     cur.execute(
         """
         SELECT
@@ -370,16 +541,21 @@ def find_duplicate_receipt(
             r.expense_type,
             r.amount,
             u.name AS driver_name
+
         FROM reimbursements r
+
         JOIN users u
             ON u.id = r.user_id
+
         WHERE r.receipt_sha256=%s
+
         LIMIT 1
         """,
         (
             sha256_hash,
         )
     )
+
 
     exact_duplicate = cur.fetchone()
 
@@ -395,10 +571,7 @@ def find_duplicate_receipt(
         }
 
 
-    # -----------------------------------------------------
     # VISUAL DUPLICATE
-    # -----------------------------------------------------
-
     if perceptual_hash:
 
         cur.execute(
@@ -411,22 +584,21 @@ def find_duplicate_receipt(
                 r.amount,
                 r.receipt_phash,
                 u.name AS driver_name
+
             FROM reimbursements r
+
             JOIN users u
                 ON u.id = r.user_id
+
             WHERE r.receipt_phash
                 IS NOT NULL
             """
         )
 
-        previous_receipts = (
-            cur.fetchall()
-        )
+        previous_receipts = cur.fetchall()
 
-        new_hash = (
-            imagehash.hex_to_hash(
-                perceptual_hash
-            )
+        new_hash = imagehash.hex_to_hash(
+            perceptual_hash
         )
 
 
@@ -434,12 +606,10 @@ def find_duplicate_receipt(
 
             try:
 
-                old_hash = (
-                    imagehash.hex_to_hash(
-                        previous[
-                            "receipt_phash"
-                        ]
-                    )
+                old_hash = imagehash.hex_to_hash(
+                    previous[
+                        "receipt_phash"
+                    ]
                 )
 
                 distance = (
@@ -523,14 +693,18 @@ def login():
         cur.execute(
             """
             SELECT *
+
             FROM users
+
             WHERE username=%s
+
             AND active=1
             """,
             (
                 username,
             )
         )
+
 
         user = cur.fetchone()
 
@@ -614,14 +788,18 @@ def forgot_password():
         cur.execute(
             """
             SELECT *
+
             FROM users
+
             WHERE username=%s
+
             AND active=1
             """,
             (
                 username,
             )
         )
+
 
         user = cur.fetchone()
 
@@ -695,24 +873,20 @@ def driver_dashboard():
             "trip_date"
         ]
 
-
         unit_number = request.form.get(
             "unit_number",
             ""
         ).strip()
-
 
         pickup_city = request.form.get(
             "pickup_city",
             ""
         ).strip()
 
-
         delivery_city = request.form.get(
             "delivery_city",
             ""
         ).strip()
-
 
         notes = request.form.get(
             "notes",
@@ -791,7 +965,6 @@ def driver_dashboard():
             )
 
             VALUES (
-
                 %s,
                 %s,
                 %s,
@@ -802,7 +975,6 @@ def driver_dashboard():
                 %s,
                 %s,
                 %s
-
             )
             """,
             (
@@ -837,8 +1009,11 @@ def driver_dashboard():
     cur.execute(
         """
         SELECT *
+
         FROM mileage_entries
+
         WHERE user_id=%s
+
         ORDER BY
             trip_date DESC,
             id DESC
@@ -857,6 +1032,7 @@ def driver_dashboard():
     cur.execute(
         """
         SELECT
+
             COALESCE(
                 SUM(total_miles),
                 0
@@ -920,33 +1096,25 @@ def reimbursements():
             ""
         ).strip()
 
-
         expense_type = request.form.get(
             "expense_type",
             ""
         ).strip()
-
 
         amount_text = request.form.get(
             "amount",
             ""
         ).strip()
 
-
         notes = request.form.get(
             "notes",
             ""
         ).strip()
 
-
         receipt = request.files.get(
             "receipt"
         )
 
-
-        # -------------------------------------------------
-        # REQUIRED FIELDS
-        # -------------------------------------------------
 
         if not expense_date:
 
@@ -975,10 +1143,6 @@ def reimbursements():
                 )
             )
 
-
-        # -------------------------------------------------
-        # AMOUNT
-        # -------------------------------------------------
 
         try:
 
@@ -1019,10 +1183,6 @@ def reimbursements():
             )
 
 
-        # -------------------------------------------------
-        # DATE VALIDATION
-        # -------------------------------------------------
-
         try:
 
             submitted_expense_date = (
@@ -1049,10 +1209,7 @@ def reimbursements():
         today = date.today()
 
 
-        if (
-            submitted_expense_date
-            > today
-        ):
+        if submitted_expense_date > today:
 
             flash(
                 "Expense date cannot be in the future.",
@@ -1065,10 +1222,6 @@ def reimbursements():
                 )
             )
 
-
-        # -------------------------------------------------
-        # 7 DAY RULE
-        # -------------------------------------------------
 
         oldest_allowed_date = (
             today
@@ -1094,10 +1247,6 @@ def reimbursements():
             )
 
 
-        # -------------------------------------------------
-        # SAME DATE / TYPE / AMOUNT CHECK
-        # -------------------------------------------------
-
         conn = get_db()
         cur = conn.cursor()
 
@@ -1105,6 +1254,7 @@ def reimbursements():
         cur.execute(
             """
             SELECT id
+
             FROM reimbursements
 
             WHERE user_id=%s
@@ -1151,10 +1301,6 @@ def reimbursements():
                 )
             )
 
-
-        # -------------------------------------------------
-        # RECEIPT
-        # -------------------------------------------------
 
         if (
             not receipt
@@ -1223,10 +1369,6 @@ def reimbursements():
             )
 
 
-        # -------------------------------------------------
-        # RECEIPT FINGERPRINT
-        # -------------------------------------------------
-
         (
             receipt_sha256,
             receipt_phash
@@ -1248,8 +1390,7 @@ def reimbursements():
             if (
                 image_duplicate[
                     "type"
-                ]
-                == "exact"
+                ] == "exact"
             ):
 
                 flash(
@@ -1321,15 +1462,14 @@ def reimbursements():
             cur = conn.cursor()
 
 
-            # ---------------------------------------------
-            # EXACT CHECK AGAIN
-            # ---------------------------------------------
-
             cur.execute(
                 """
                 SELECT id
+
                 FROM reimbursements
+
                 WHERE receipt_sha256=%s
+
                 LIMIT 1
                 """,
                 (
@@ -1393,7 +1533,6 @@ def reimbursements():
                 )
 
                 VALUES (
-
                     %s,
                     %s,
                     %s,
@@ -1405,7 +1544,6 @@ def reimbursements():
                     %s,
                     %s,
                     %s
-
                 )
                 """,
                 (
@@ -1482,10 +1620,6 @@ def reimbursements():
             )
 
 
-    # -----------------------------------------------------
-    # DRIVER REIMBURSEMENT HISTORY
-    # -----------------------------------------------------
-
     conn = get_db()
     cur = conn.cursor()
 
@@ -1493,6 +1627,7 @@ def reimbursements():
     cur.execute(
         """
         SELECT *
+
         FROM reimbursements
 
         WHERE user_id=%s
@@ -1551,17 +1686,28 @@ def driver_dispatches():
     cur.execute(
         """
         SELECT *
+
         FROM dispatches
 
         WHERE user_id=%s
 
         ORDER BY
+
             CASE status
-                WHEN 'Assigned' THEN 1
-                WHEN 'Picked Up' THEN 2
-                WHEN 'Delivered' THEN 3
+
+                WHEN 'Assigned'
+                    THEN 1
+
+                WHEN 'Picked Up'
+                    THEN 2
+
+                WHEN 'Delivered'
+                    THEN 3
+
                 ELSE 4
+
             END,
+
             id DESC
         """,
         (
@@ -1658,6 +1804,7 @@ def update_dispatch_status(
 
 
     updated = cur.rowcount
+
 
     conn.commit()
 
@@ -1769,6 +1916,7 @@ def admin_dashboard():
 
     cur.execute("""
         SELECT
+
             COALESCE(
                 SUM(total_miles),
                 0
@@ -1830,6 +1978,7 @@ def delete_entry(
     cur.execute(
         """
         DELETE FROM mileage_entries
+
         WHERE id=%s
         """,
         (
@@ -1917,6 +2066,7 @@ def admin_reimbursements():
 
     cur.execute("""
         SELECT
+
             COALESCE(
                 SUM(amount),
                 0
@@ -2057,7 +2207,9 @@ def delete_reimbursement(
     cur.execute(
         """
         SELECT receipt_public_id
+
         FROM reimbursements
+
         WHERE id=%s
         """,
         (
@@ -2098,6 +2250,7 @@ def delete_reimbursement(
     cur.execute(
         """
         DELETE FROM reimbursements
+
         WHERE id=%s
         """,
         (
@@ -2140,6 +2293,106 @@ def delete_reimbursement(
             "admin_reimbursements"
         )
     )
+
+
+# =========================================================
+# SAVED LOCATION AUTOCOMPLETE API
+# =========================================================
+
+@app.route(
+    "/admin/location-search"
+)
+def location_search():
+
+    if not require_login(
+        "admin"
+    ):
+
+        return jsonify([]), 403
+
+
+    query = request.args.get(
+        "q",
+        ""
+    ).strip()
+
+
+    if len(query) < 1:
+
+        return jsonify([])
+
+
+    conn = get_db()
+    cur = conn.cursor()
+
+
+    cur.execute(
+        """
+        SELECT
+            id,
+            company_name,
+            address,
+            contact_name,
+            phone
+
+        FROM dispatch_locations
+
+        WHERE
+            company_name ILIKE %s
+
+            OR address ILIKE %s
+
+        ORDER BY
+            company_name ASC,
+            address ASC
+
+        LIMIT 15
+        """,
+        (
+            f"%{query}%",
+            f"%{query}%"
+        )
+    )
+
+
+    locations = cur.fetchall()
+
+
+    cur.close()
+    conn.close()
+
+
+    results = []
+
+
+    for location in locations:
+
+        results.append({
+            "id": location["id"],
+            "company_name": (
+                location[
+                    "company_name"
+                ]
+            ),
+            "address": (
+                location[
+                    "address"
+                ]
+            ),
+            "contact_name": (
+                location[
+                    "contact_name"
+                ] or ""
+            ),
+            "phone": (
+                location[
+                    "phone"
+                ] or ""
+            )
+        })
+
+
+    return jsonify(results)
 
 
 # =========================================================
@@ -2302,10 +2555,10 @@ def admin_dispatches():
         cur = conn.cursor()
 
 
-        # MAKE SURE DRIVER EXISTS
         cur.execute(
             """
             SELECT id
+
             FROM users
 
             WHERE id=%s
@@ -2438,6 +2691,30 @@ def admin_dispatches():
         conn.close()
 
 
+        # -------------------------------------------------
+        # REMEMBER PICKUP LOCATION
+        # -------------------------------------------------
+
+        save_dispatch_location(
+            pickup_company,
+            pickup_address,
+            pickup_contact,
+            pickup_phone
+        )
+
+
+        # -------------------------------------------------
+        # REMEMBER DELIVERY LOCATION
+        # -------------------------------------------------
+
+        save_dispatch_location(
+            delivery_company,
+            delivery_address,
+            delivery_contact,
+            delivery_phone
+        )
+
+
         flash(
             "Dispatch sent to contractor.",
             "success"
@@ -2452,7 +2729,7 @@ def admin_dispatches():
 
 
     # -----------------------------------------------------
-    # GET DRIVERS + ALL DISPATCHES
+    # GET DRIVERS + DISPATCHES
     # -----------------------------------------------------
 
     conn = get_db()
@@ -2493,14 +2770,20 @@ def admin_dispatches():
             ON u.id = d.user_id
 
         ORDER BY
+
             CASE d.status
+
                 WHEN 'Assigned'
                     THEN 1
+
                 WHEN 'Picked Up'
                     THEN 2
+
                 WHEN 'Delivered'
                     THEN 3
+
                 ELSE 4
+
             END,
 
             d.id DESC
@@ -2551,6 +2834,7 @@ def delete_dispatch(
     cur.execute(
         """
         DELETE FROM dispatches
+
         WHERE id=%s
         """,
         (
@@ -2663,12 +2947,10 @@ def add_driver():
                 )
 
                 VALUES (
-
                     %s,
                     %s,
                     %s,
                     'driver'
-
                 )
                 """,
                 (
