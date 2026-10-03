@@ -1,7 +1,12 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
+
 import psycopg2
 import psycopg2.extras
+
+import cloudinary
+import cloudinary.uploader
+
 from datetime import datetime, timedelta
 import os
 
@@ -11,7 +16,14 @@ app = Flask(__name__)
 app.permanent_session_lifetime = timedelta(days=30)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret-key")
 
+# Maximum upload size: 10 MB
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
+
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+# Cloudinary automatically reads CLOUDINARY_URL
+# from your Render environment variables.
+cloudinary.config(secure=True)
 
 
 # ---------------------------------------------------------
@@ -19,6 +31,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 # ---------------------------------------------------------
 
 def get_db():
+
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is not configured.")
 
@@ -33,10 +46,11 @@ def get_db():
 # ---------------------------------------------------------
 
 def init_db():
+
     conn = get_db()
     cur = conn.cursor()
 
-    # Users table
+    # USERS TABLE
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -48,7 +62,7 @@ def init_db():
         )
     """)
 
-    # Mileage entries table
+    # MILEAGE TABLE
     cur.execute("""
         CREATE TABLE IF NOT EXISTS mileage_entries (
             id SERIAL PRIMARY KEY,
@@ -66,11 +80,33 @@ def init_db():
         )
     """)
 
+    # REIMBURSEMENTS TABLE
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS reimbursements (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            expense_date TEXT NOT NULL,
+            expense_type TEXT NOT NULL,
+            amount NUMERIC(10,2) NOT NULL,
+            notes TEXT,
+            receipt_url TEXT NOT NULL,
+            receipt_public_id TEXT,
+            status TEXT NOT NULL DEFAULT 'Unpaid',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id)
+        )
+    """)
+
     conn.commit()
 
-    # Check for admin account
+    # CHECK FOR ADMIN
     cur.execute(
-        "SELECT id FROM users WHERE role=%s LIMIT 1",
+        """
+        SELECT id, password_hash
+        FROM users
+        WHERE role=%s
+        LIMIT 1
+        """,
         ("admin",)
     )
 
@@ -78,8 +114,9 @@ def init_db():
 
     admin_password = os.environ.get("ADMIN_PASSWORD")
 
-    # Create admin if one does not exist
+    # CREATE ADMIN IF NEEDED
     if not admin:
+
         cur.execute(
             """
             INSERT INTO users (
@@ -100,20 +137,28 @@ def init_db():
             )
         )
 
-    # Update admin password to match Render ADMIN_PASSWORD
-    elif admin_password:
-        cur.execute(
-            """
-            UPDATE users
-            SET password_hash=%s
-            WHERE role='admin'
-            """,
-            (
-                generate_password_hash(admin_password),
-            )
-        )
+        conn.commit()
 
-    conn.commit()
+    # UPDATE ADMIN PASSWORD ONLY IF IT CHANGED
+    elif admin_password:
+
+        if not check_password_hash(
+            admin["password_hash"],
+            admin_password
+        ):
+
+            cur.execute(
+                """
+                UPDATE users
+                SET password_hash=%s
+                WHERE role='admin'
+                """,
+                (
+                    generate_password_hash(admin_password),
+                )
+            )
+
+            conn.commit()
 
     cur.close()
     conn.close()
@@ -121,6 +166,7 @@ def init_db():
 
 @app.before_request
 def setup():
+
     init_db()
 
 
@@ -129,6 +175,7 @@ def setup():
 # ---------------------------------------------------------
 
 def require_login(role=None):
+
     if "user_id" not in session:
         return False
 
@@ -156,7 +203,10 @@ def login():
 
         username = request.form["username"].strip()
         password = request.form["password"]
-        remember_me = request.form.get("remember_me") == "yes"
+
+        remember_me = (
+            request.form.get("remember_me") == "yes"
+        )
 
         conn = get_db()
         cur = conn.cursor()
@@ -166,7 +216,7 @@ def login():
             SELECT *
             FROM users
             WHERE username=%s
-              AND active=1
+            AND active=1
             """,
             (username,)
         )
@@ -190,9 +240,13 @@ def login():
             session["role"] = user["role"]
 
             if user["role"] == "admin":
-                return redirect(url_for("admin_dashboard"))
+                return redirect(
+                    url_for("admin_dashboard")
+                )
 
-            return redirect(url_for("driver_dashboard"))
+            return redirect(
+                url_for("driver_dashboard")
+            )
 
         flash(
             "Invalid username or password.",
@@ -206,12 +260,17 @@ def login():
 # FORGOT PASSWORD
 # ---------------------------------------------------------
 
-@app.route("/forgot-password", methods=["GET", "POST"])
+@app.route(
+    "/forgot-password",
+    methods=["GET", "POST"]
+)
 def forgot_password():
 
     if request.method == "POST":
 
-        username = request.form["username"].strip()
+        username = request.form[
+            "username"
+        ].strip()
 
         conn = get_db()
         cur = conn.cursor()
@@ -221,7 +280,7 @@ def forgot_password():
             SELECT *
             FROM users
             WHERE username=%s
-              AND active=1
+            AND active=1
             """,
             (username,)
         )
@@ -267,19 +326,23 @@ def logout():
 
 
 # ---------------------------------------------------------
-# DRIVER DASHBOARD
+# DRIVER MILEAGE DASHBOARD
 # ---------------------------------------------------------
 
-@app.route("/driver", methods=["GET", "POST"])
+@app.route(
+    "/driver",
+    methods=["GET", "POST"]
+)
 def driver_dashboard():
 
     if not require_login("driver"):
-        return redirect(url_for("login"))
+        return redirect(
+            url_for("login")
+        )
 
     conn = get_db()
     cur = conn.cursor()
 
-    # Submit mileage
     if request.method == "POST":
 
         trip_date = request.form["trip_date"]
@@ -387,7 +450,6 @@ def driver_dashboard():
             "success"
         )
 
-    # Driver mileage history
     cur.execute(
         """
         SELECT *
@@ -402,7 +464,6 @@ def driver_dashboard():
 
     entries = cur.fetchall()
 
-    # Driver total mileage
     cur.execute(
         """
         SELECT
@@ -433,6 +494,242 @@ def driver_dashboard():
 
 
 # ---------------------------------------------------------
+# DRIVER REIMBURSEMENTS
+# ---------------------------------------------------------
+
+@app.route(
+    "/reimbursements",
+    methods=["GET", "POST"]
+)
+def reimbursements():
+
+    if not require_login("driver"):
+        return redirect(
+            url_for("login")
+        )
+
+    if request.method == "POST":
+
+        expense_date = request.form.get(
+            "expense_date",
+            ""
+        ).strip()
+
+        expense_type = request.form.get(
+            "expense_type",
+            ""
+        ).strip()
+
+        amount_text = request.form.get(
+            "amount",
+            ""
+        ).strip()
+
+        notes = request.form.get(
+            "notes",
+            ""
+        ).strip()
+
+        receipt = request.files.get("receipt")
+
+        # VALIDATE REQUIRED FIELDS
+        if not expense_date:
+
+            flash(
+                "Please enter the expense date.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        if not expense_type:
+
+            flash(
+                "Please select an expense type.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        try:
+
+            amount = float(amount_text)
+
+        except ValueError:
+
+            flash(
+                "Please enter a valid reimbursement amount.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        if amount <= 0:
+
+            flash(
+                "Reimbursement amount must be greater than $0.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        if not receipt or receipt.filename == "":
+
+            flash(
+                "Please upload a receipt photo.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        # ONLY ALLOW IMAGE FILES
+        if not receipt.mimetype.startswith("image/"):
+
+            flash(
+                "Receipt must be an image.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        uploaded_public_id = None
+
+        try:
+
+            # UPLOAD RECEIPT TO CLOUDINARY
+            upload_result = cloudinary.uploader.upload(
+                receipt,
+                folder="tnt_mileage/reimbursements",
+                resource_type="image"
+            )
+
+            receipt_url = upload_result[
+                "secure_url"
+            ]
+
+            uploaded_public_id = upload_result[
+                "public_id"
+            ]
+
+            conn = get_db()
+            cur = conn.cursor()
+
+            cur.execute(
+                """
+                INSERT INTO reimbursements (
+                    user_id,
+                    expense_date,
+                    expense_type,
+                    amount,
+                    notes,
+                    receipt_url,
+                    receipt_public_id,
+                    status,
+                    created_at
+                )
+                VALUES (
+                    %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s
+                )
+                """,
+                (
+                    session["user_id"],
+                    expense_date,
+                    expense_type,
+                    amount,
+                    notes,
+                    receipt_url,
+                    uploaded_public_id,
+                    "Unpaid",
+                    datetime.now().isoformat(
+                        timespec="seconds"
+                    )
+                )
+            )
+
+            conn.commit()
+
+            cur.close()
+            conn.close()
+
+            flash(
+                "Reimbursement submitted successfully.",
+                "success"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        except Exception as e:
+
+            # REMOVE IMAGE IF DATABASE SAVE FAILED
+            if uploaded_public_id:
+
+                try:
+
+                    cloudinary.uploader.destroy(
+                        uploaded_public_id
+                    )
+
+                except Exception:
+                    pass
+
+            print(
+                "Reimbursement upload error:",
+                e
+            )
+
+            flash(
+                "There was a problem uploading your reimbursement. "
+                "Please try again.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+    # SHOW DRIVER'S OWN REIMBURSEMENTS
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT *
+        FROM reimbursements
+        WHERE user_id=%s
+        ORDER BY expense_date DESC, id DESC
+        """,
+        (
+            session["user_id"],
+        )
+    )
+
+    reimbursement_entries = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "reimbursements.html",
+        reimbursements=reimbursement_entries
+    )
+
+
+# ---------------------------------------------------------
 # ADMIN DASHBOARD
 # ---------------------------------------------------------
 
@@ -447,7 +744,6 @@ def admin_dashboard():
     conn = get_db()
     cur = conn.cursor()
 
-    # All mileage entries
     cur.execute("""
         SELECT
             m.*,
@@ -463,7 +759,6 @@ def admin_dashboard():
 
     entries = cur.fetchall()
 
-    # Totals by driver
     cur.execute("""
         SELECT
             u.id,
@@ -490,7 +785,6 @@ def admin_dashboard():
 
     driver_totals = cur.fetchall()
 
-    # Grand total mileage
     cur.execute("""
         SELECT
             COALESCE(
@@ -517,7 +811,6 @@ def admin_dashboard():
 
 # ---------------------------------------------------------
 # DELETE MILEAGE ENTRY
-# ADMIN ONLY
 # ---------------------------------------------------------
 
 @app.route(
@@ -571,6 +864,211 @@ def delete_entry(entry_id):
 
 
 # ---------------------------------------------------------
+# ADMIN REIMBURSEMENTS
+# ---------------------------------------------------------
+
+@app.route("/admin/reimbursements")
+def admin_reimbursements():
+
+    if not require_login("admin"):
+        return redirect(
+            url_for("login")
+        )
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT
+            r.*,
+            u.name AS driver_name,
+            u.username
+        FROM reimbursements r
+        JOIN users u
+            ON u.id = r.user_id
+        ORDER BY
+            r.expense_date DESC,
+            r.id DESC
+    """)
+
+    reimbursement_entries = cur.fetchall()
+
+    cur.execute("""
+        SELECT
+            COALESCE(
+                SUM(amount),
+                0
+            ) AS total
+        FROM reimbursements
+        WHERE status='Unpaid'
+    """)
+
+    unpaid_row = cur.fetchone()
+
+    unpaid_total = unpaid_row["total"]
+
+    cur.close()
+    conn.close()
+
+    return render_template(
+        "admin_reimbursements.html",
+        reimbursements=reimbursement_entries,
+        unpaid_total=unpaid_total
+    )
+
+
+# ---------------------------------------------------------
+# UPDATE REIMBURSEMENT STATUS
+# ---------------------------------------------------------
+
+@app.route(
+    "/admin/reimbursement/<int:reimbursement_id>/status",
+    methods=["POST"]
+)
+def update_reimbursement_status(
+    reimbursement_id
+):
+
+    if not require_login("admin"):
+        return redirect(
+            url_for("login")
+        )
+
+    status = request.form.get(
+        "status",
+        "Unpaid"
+    )
+
+    if status not in [
+        "Paid",
+        "Unpaid"
+    ]:
+
+        status = "Unpaid"
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        UPDATE reimbursements
+        SET status=%s
+        WHERE id=%s
+        """,
+        (
+            status,
+            reimbursement_id
+        )
+    )
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    flash(
+        f"Reimbursement marked {status}.",
+        "success"
+    )
+
+    return redirect(
+        url_for("admin_reimbursements")
+    )
+
+
+# ---------------------------------------------------------
+# DELETE REIMBURSEMENT
+# ---------------------------------------------------------
+
+@app.route(
+    "/admin/delete-reimbursement/<int:reimbursement_id>",
+    methods=["POST"]
+)
+def delete_reimbursement(
+    reimbursement_id
+):
+
+    if not require_login("admin"):
+        return redirect(
+            url_for("login")
+        )
+
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT receipt_public_id
+        FROM reimbursements
+        WHERE id=%s
+        """,
+        (
+            reimbursement_id,
+        )
+    )
+
+    reimbursement = cur.fetchone()
+
+    if not reimbursement:
+
+        cur.close()
+        conn.close()
+
+        flash(
+            "Reimbursement was not found.",
+            "error"
+        )
+
+        return redirect(
+            url_for("admin_reimbursements")
+        )
+
+    public_id = reimbursement[
+        "receipt_public_id"
+    ]
+
+    cur.execute(
+        """
+        DELETE FROM reimbursements
+        WHERE id=%s
+        """,
+        (
+            reimbursement_id,
+        )
+    )
+
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    # DELETE RECEIPT FROM CLOUDINARY
+    if public_id:
+
+        try:
+
+            cloudinary.uploader.destroy(
+                public_id
+            )
+
+        except Exception as e:
+
+            print(
+                "Cloudinary delete error:",
+                e
+            )
+
+    flash(
+        "Reimbursement deleted.",
+        "success"
+    )
+
+    return redirect(
+        url_for("admin_reimbursements")
+    )
+
+
+# ---------------------------------------------------------
 # ADD DRIVER
 # ---------------------------------------------------------
 
@@ -585,7 +1083,6 @@ def add_driver():
             url_for("login")
         )
 
-    # Add driver
     if request.method == "POST":
 
         name = request.form[
@@ -665,7 +1162,6 @@ def add_driver():
             url_for("add_driver")
         )
 
-    # Display current drivers
     conn = get_db()
     cur = conn.cursor()
 
