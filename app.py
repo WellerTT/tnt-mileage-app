@@ -7,7 +7,7 @@ import psycopg2.extras
 import cloudinary
 import cloudinary.uploader
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import os
 
 
@@ -16,13 +16,12 @@ app = Flask(__name__)
 app.permanent_session_lifetime = timedelta(days=30)
 app.secret_key = os.environ.get("SECRET_KEY", "change-this-secret-key")
 
-# Maximum upload size: 10 MB
+# Maximum receipt upload size: 10 MB
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# Cloudinary automatically reads CLOUDINARY_URL
-# from your Render environment variables.
+# Cloudinary reads CLOUDINARY_URL from Render
 cloudinary.config(secure=True)
 
 
@@ -139,7 +138,7 @@ def init_db():
 
         conn.commit()
 
-    # UPDATE ADMIN PASSWORD ONLY IF IT CHANGED
+    # UPDATE ADMIN PASSWORD ONLY IF NEEDED
     elif admin_password:
 
         if not check_password_hash(
@@ -240,6 +239,7 @@ def login():
             session["role"] = user["role"]
 
             if user["role"] == "admin":
+
                 return redirect(
                     url_for("admin_dashboard")
                 )
@@ -336,6 +336,7 @@ def logout():
 def driver_dashboard():
 
     if not require_login("driver"):
+
         return redirect(
             url_for("login")
         )
@@ -445,8 +446,7 @@ def driver_dashboard():
         conn.commit()
 
         flash(
-            f"Mileage submitted: "
-            f"{total:,.1f} miles.",
+            f"Mileage submitted: {total:,.1f} miles.",
             "success"
         )
 
@@ -504,6 +504,7 @@ def driver_dashboard():
 def reimbursements():
 
     if not require_login("driver"):
+
         return redirect(
             url_for("login")
         )
@@ -532,7 +533,10 @@ def reimbursements():
 
         receipt = request.files.get("receipt")
 
-        # VALIDATE REQUIRED FIELDS
+        # -------------------------------------------------
+        # REQUIRED FIELD CHECKS
+        # -------------------------------------------------
+
         if not expense_date:
 
             flash(
@@ -557,7 +561,10 @@ def reimbursements():
 
         try:
 
-            amount = float(amount_text)
+            amount = round(
+                float(amount_text),
+                2
+            )
 
         except ValueError:
 
@@ -581,6 +588,108 @@ def reimbursements():
                 url_for("reimbursements")
             )
 
+        # -------------------------------------------------
+        # EXPENSE DATE VALIDATION
+        # -------------------------------------------------
+
+        try:
+
+            submitted_expense_date = datetime.strptime(
+                expense_date,
+                "%Y-%m-%d"
+            ).date()
+
+        except ValueError:
+
+            flash(
+                "Please enter a valid expense date.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        today = date.today()
+
+        # DO NOT ALLOW FUTURE DATES
+        if submitted_expense_date > today:
+
+            flash(
+                "Expense date cannot be in the future.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        # -------------------------------------------------
+        # 7-DAY REIMBURSEMENT LIMIT
+        # -------------------------------------------------
+
+        oldest_allowed_date = (
+            today - timedelta(days=7)
+        )
+
+        if submitted_expense_date < oldest_allowed_date:
+
+            flash(
+                "Reimbursements must be submitted within "
+                "7 days of the expense date.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        # -------------------------------------------------
+        # DUPLICATE REIMBURSEMENT CHECK
+        # -------------------------------------------------
+
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT id
+            FROM reimbursements
+            WHERE user_id=%s
+              AND expense_date=%s
+              AND LOWER(expense_type)=LOWER(%s)
+              AND amount=%s
+            LIMIT 1
+            """,
+            (
+                session["user_id"],
+                expense_date,
+                expense_type,
+                amount
+            )
+        )
+
+        duplicate = cur.fetchone()
+
+        cur.close()
+        conn.close()
+
+        if duplicate:
+
+            flash(
+                "Possible duplicate reimbursement. "
+                "This expense has already been submitted.",
+                "error"
+            )
+
+            return redirect(
+                url_for("reimbursements")
+            )
+
+        # -------------------------------------------------
+        # RECEIPT VALIDATION
+        # -------------------------------------------------
+
         if not receipt or receipt.filename == "":
 
             flash(
@@ -592,7 +701,6 @@ def reimbursements():
                 url_for("reimbursements")
             )
 
-        # ONLY ALLOW IMAGE FILES
         if not receipt.mimetype.startswith("image/"):
 
             flash(
@@ -608,7 +716,10 @@ def reimbursements():
 
         try:
 
+            # ---------------------------------------------
             # UPLOAD RECEIPT TO CLOUDINARY
+            # ---------------------------------------------
+
             upload_result = cloudinary.uploader.upload(
                 receipt,
                 folder="tnt_mileage/reimbursements",
@@ -623,8 +734,54 @@ def reimbursements():
                 "public_id"
             ]
 
+            # ---------------------------------------------
+            # SAVE REIMBURSEMENT
+            # ---------------------------------------------
+
             conn = get_db()
             cur = conn.cursor()
+
+            # SECOND DUPLICATE CHECK
+            # Helps prevent two identical submissions
+            # made very close together.
+            cur.execute(
+                """
+                SELECT id
+                FROM reimbursements
+                WHERE user_id=%s
+                  AND expense_date=%s
+                  AND LOWER(expense_type)=LOWER(%s)
+                  AND amount=%s
+                LIMIT 1
+                """,
+                (
+                    session["user_id"],
+                    expense_date,
+                    expense_type,
+                    amount
+                )
+            )
+
+            duplicate = cur.fetchone()
+
+            if duplicate:
+
+                cur.close()
+                conn.close()
+
+                cloudinary.uploader.destroy(
+                    uploaded_public_id
+                )
+
+                flash(
+                    "Possible duplicate reimbursement. "
+                    "This expense has already been submitted.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for("reimbursements")
+                )
 
             cur.execute(
                 """
@@ -675,7 +832,6 @@ def reimbursements():
 
         except Exception as e:
 
-            # REMOVE IMAGE IF DATABASE SAVE FAILED
             if uploaded_public_id:
 
                 try:
@@ -702,7 +858,10 @@ def reimbursements():
                 url_for("reimbursements")
             )
 
-    # SHOW DRIVER'S OWN REIMBURSEMENTS
+    # -----------------------------------------------------
+    # SHOW DRIVER'S REIMBURSEMENTS
+    # -----------------------------------------------------
+
     conn = get_db()
     cur = conn.cursor()
 
@@ -737,6 +896,7 @@ def reimbursements():
 def admin_dashboard():
 
     if not require_login("admin"):
+
         return redirect(
             url_for("login")
         )
@@ -820,6 +980,7 @@ def admin_dashboard():
 def delete_entry(entry_id):
 
     if not require_login("admin"):
+
         return redirect(
             url_for("login")
         )
@@ -871,6 +1032,7 @@ def delete_entry(entry_id):
 def admin_reimbursements():
 
     if not require_login("admin"):
+
         return redirect(
             url_for("login")
         )
@@ -930,6 +1092,7 @@ def update_reimbursement_status(
 ):
 
     if not require_login("admin"):
+
         return redirect(
             url_for("login")
         )
@@ -989,6 +1152,7 @@ def delete_reimbursement(
 ):
 
     if not require_login("admin"):
+
         return redirect(
             url_for("login")
         )
@@ -1042,7 +1206,6 @@ def delete_reimbursement(
     cur.close()
     conn.close()
 
-    # DELETE RECEIPT FROM CLOUDINARY
     if public_id:
 
         try:
@@ -1079,6 +1242,7 @@ def delete_reimbursement(
 def add_driver():
 
     if not require_login("admin"):
+
         return redirect(
             url_for("login")
         )
