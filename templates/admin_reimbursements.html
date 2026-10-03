@@ -3,48 +3,114 @@
 {% block content %}
 
 <div class="top-row">
+
     <div>
         <h2>Admin Reimbursements</h2>
+
         <p class="muted">
-            Review driver reimbursements and receipt photos.
+            Review reimbursements grouped by employee.
         </p>
     </div>
 
     <div class="stat">
+
         <strong>
             ${{ "%.2f"|format(unpaid_total) }}
         </strong>
+
         <span>
-            Unpaid Reimbursements
+            Total Unpaid
         </span>
+
     </div>
+
 </div>
 
 
+{% set grouped = reimbursements|groupby("driver_name") %}
+
+
+{% for driver_name, driver_reimbursements in grouped %}
+
 <div class="card">
 
-    <h3>All Reimbursements</h3>
+    <div class="top-row">
+
+        <div>
+
+            <h3>
+                {{ driver_name }}
+            </h3>
+
+            <p class="muted">
+
+                {{ driver_reimbursements|length }}
+
+                reimbursement{% if driver_reimbursements|length != 1 %}s{% endif %}
+
+            </p>
+
+        </div>
+
+
+        <div class="stat">
+
+            {% set ns = namespace(total=0) %}
+
+            {% for r in driver_reimbursements %}
+
+                {% if r.status == "Unpaid" %}
+
+                    {% set ns.total = ns.total + r.amount %}
+
+                {% endif %}
+
+            {% endfor %}
+
+
+            <strong>
+                ${{ "%.2f"|format(ns.total) }}
+            </strong>
+
+            <span>
+                Employee Unpaid
+            </span>
+
+        </div>
+
+    </div>
+
 
     <div class="table-wrap">
 
         <table style="min-width: 1100px;">
 
             <thead>
+
                 <tr>
+
                     <th>Date</th>
-                    <th>Driver</th>
+
                     <th>Type</th>
+
                     <th>Amount</th>
+
                     <th>Notes</th>
+
                     <th>Receipt</th>
+
                     <th>Status</th>
+
                     <th>Delete</th>
+
                 </tr>
+
             </thead>
+
 
             <tbody>
 
-                {% for r in reimbursements %}
+                {% for r in driver_reimbursements %}
 
                 <tr>
 
@@ -52,25 +118,28 @@
                         {{ r.expense_date }}
                     </td>
 
-                    <td>
-                        {{ r.driver_name }}
-                    </td>
 
                     <td>
                         {{ r.expense_type }}
                     </td>
 
+
                     <td>
+
                         <strong>
                             ${{ "%.2f"|format(r.amount) }}
                         </strong>
+
                     </td>
+
 
                     <td>
                         {{ r.notes or "" }}
                     </td>
 
+
                     <td>
+
                         <a
                             href="{{ r.receipt_url }}"
                             target="_blank"
@@ -78,7 +147,9 @@
                         >
                             View Receipt
                         </a>
+
                     </td>
+
 
                     <td>
 
@@ -99,6 +170,7 @@
                                     Unpaid
                                 </option>
 
+
                                 <option
                                     value="Paid"
                                     {% if r.status == "Paid" %}selected{% endif %}
@@ -112,6 +184,7 @@
 
                     </td>
 
+
                     <td>
 
                         <form
@@ -122,6 +195,7 @@
 
                             <button
                                 type="submit"
+                                title="Delete reimbursement"
                                 style="
                                     background:#dc3545;
                                     color:white;
@@ -129,8 +203,10 @@
                                     border-radius:50%;
                                     width:30px;
                                     height:30px;
+                                    padding:0;
                                     font-size:20px;
                                     font-weight:bold;
+                                    line-height:28px;
                                     cursor:pointer;
                                 "
                             >
@@ -143,14 +219,6 @@
 
                 </tr>
 
-                {% else %}
-
-                <tr>
-                    <td colspan="8">
-                        No reimbursements have been submitted yet.
-                    </td>
-                </tr>
-
                 {% endfor %}
 
             </tbody>
@@ -160,6 +228,19 @@
     </div>
 
 </div>
+
+
+{% else %}
+
+<div class="card">
+
+    <p>
+        No reimbursements have been submitted yet.
+    </p>
+
+</div>
+
+{% endfor %}
 
 
 <div style="margin-top:20px;">
@@ -174,4 +255,3 @@
 </div>
 
 {% endblock %}
-
