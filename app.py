@@ -63,26 +63,35 @@ def init_db():
     )
     admin = cur.fetchone()
 
-    if not admin:
-        admin_password = os.environ.get(
-            "ADMIN_PASSWORD",
-            "ChangeMeImmediately"
-        )
+  admin_password = os.environ.get("ADMIN_PASSWORD")
 
+if not admin:
+    cur.execute(
+        """
+        INSERT INTO users (name, username, password_hash, role)
+        VALUES (%s, %s, %s, %s)
+        """,
+        (
+            "TNT Admin",
+            "admin",
+            generate_password_hash(admin_password or "ChangeMeImmediately"),
+            "admin"
+        )
+    )
+else:
+    if admin_password:
         cur.execute(
             """
-            INSERT INTO users (name, username, password_hash, role)
-            VALUES (%s, %s, %s, %s)
+            UPDATE users
+            SET password_hash=%s
+            WHERE role='admin'
             """,
             (
-                "TNT Admin",
-                "admin",
                 generate_password_hash(admin_password),
-                "admin"
             )
         )
 
-        conn.commit()
+conn.commit()
 
     cur.close()
     conn.close()
