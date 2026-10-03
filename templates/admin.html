@@ -1,70 +1,205 @@
 {% extends "base.html" %}
+
 {% block content %}
+
 <div class="top-row">
     <div>
         <h2>Admin Dashboard</h2>
-        <p class="muted">You can see all drivers. Drivers cannot see each other.</p>
+        <p class="muted">
+            You can see all drivers. Drivers cannot see each other.
+        </p>
     </div>
+
     <div class="stat">
         <strong>{{ "%.1f"|format(grand_total) }}</strong>
         <span>All Driver Miles</span>
     </div>
 </div>
 
+
 <div class="actions">
-    <a class="button-link" href="{{ url_for('add_driver') }}">+ Add Driver</a>
+    <a class="button-link" href="{{ url_for('add_driver') }}">
+        + Add Driver
+    </a>
 </div>
 
+
+<!-- DRIVER TOTALS -->
 <div class="card">
+
     <h3>Driver Totals</h3>
+
     <div class="table-wrap">
-    <table>
-        <thead>
-            <tr><th>Driver</th><th>Username</th><th>Entries</th><th>Total Miles</th></tr>
-        </thead>
-        <tbody>
-            {% for d in driver_totals %}
-            <tr>
-                <td>{{ d.name }}</td>
-                <td>{{ d.username }}</td>
-                <td>{{ d.entry_count }}</td>
-                <td><strong>{{ "%.1f"|format(d.total_miles) }}</strong></td>
-            </tr>
-            {% else %}
-            <tr><td colspan="4">No drivers added yet.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>Driver</th>
+                    <th>Username</th>
+                    <th>Entries</th>
+                    <th>Total Miles</th>
+                </tr>
+            </thead>
+
+            <tbody>
+
+                {% for d in driver_totals %}
+
+                <tr>
+                    <td>{{ d.name }}</td>
+
+                    <td>{{ d.username }}</td>
+
+                    <td>{{ d.entry_count }}</td>
+
+                    <td>
+                        <strong>
+                            {{ "%.1f"|format(d.total_miles) }}
+                        </strong>
+                    </td>
+                </tr>
+
+                {% else %}
+
+                <tr>
+                    <td colspan="4">
+                        No drivers added yet.
+                    </td>
+                </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
     </div>
+
 </div>
 
+
+<!-- ALL MILEAGE ENTRIES -->
 <div class="card">
-    <h3>All Mileage Entries</h3>
-    <div class="table-wrap">
-    <table>
-        <thead>
-            <tr>
-                <th>Date</th><th>Driver</th><th>Unit</th><th>Route</th><th>Beginning Miles</th><th>Ending Miles</th><th>Total Miles</th><th>Notes</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for e in entries %}
-            <tr>
 
-<td>{{ e.trip_date }}</td>
-<td>{{ e.driver_name }}</td>
-<td>{{ e.unit_number or "" }}</td>
-<td>{{ e.pickup_city or "" }} → {{ e.delivery_city or "" }}</td>
-<td>{{ "%.1f"|format(e.beginning_miles) }}</td>
-<td>{{ "%.1f"|format(e.ending_miles) }}</td>
-<td><strong>{{ "%.1f"|format(e.total_miles) }}</strong></td>
-<td>{{ e.notes or "" }}</td>
-            </tr>
-            {% else %}
-            <tr><td colspan="8">No mileage has been submitted yet.</td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <h3>All Mileage Entries</h3>
+
+    <p class="muted">
+        Swipe left or right on mobile to see all mileage details.
+    </p>
+
+    <div class="table-wrap">
+
+        <table style="min-width: 1100px;">
+
+            <thead>
+
+                <tr>
+                    <th>Date</th>
+                    <th>Driver</th>
+                    <th>Unit</th>
+                    <th>Route</th>
+                    <th>Beginning Miles</th>
+                    <th>Ending Miles</th>
+                    <th>Total Miles</th>
+                    <th>Notes</th>
+                    <th>Delete</th>
+                </tr>
+
+            </thead>
+
+            <tbody>
+
+                {% for e in entries %}
+
+                <tr>
+
+                    <td>
+                        {{ e.trip_date }}
+                    </td>
+
+                    <td>
+                        {{ e.driver_name }}
+                    </td>
+
+                    <td>
+                        {{ e.unit_number or "" }}
+                    </td>
+
+                    <td>
+                        {{ e.pickup_city or "" }}
+                        →
+                        {{ e.delivery_city or "" }}
+                    </td>
+
+                    <td>
+                        {{ "%.1f"|format(e.beginning_miles) }}
+                    </td>
+
+                    <td>
+                        {{ "%.1f"|format(e.ending_miles) }}
+                    </td>
+
+                    <td>
+                        <strong>
+                            {{ "%.1f"|format(e.total_miles) }}
+                        </strong>
+                    </td>
+
+                    <td>
+                        {{ e.notes or "" }}
+                    </td>
+
+                    <td>
+
+                        <form
+                            method="post"
+                            action="{{ url_for('delete_entry', entry_id=e.id) }}"
+                            onsubmit="return confirm('Are you sure you want to delete this mileage entry? This cannot be undone.');"
+                        >
+
+                            <button
+                                type="submit"
+                                title="Delete mileage entry"
+                                style="
+                                    background: #dc3545;
+                                    color: white;
+                                    border: none;
+                                    border-radius: 50%;
+                                    width: 30px;
+                                    height: 30px;
+                                    padding: 0;
+                                    font-size: 20px;
+                                    font-weight: bold;
+                                    line-height: 28px;
+                                    cursor: pointer;
+                                "
+                            >
+                                −
+                            </button>
+
+                        </form>
+
+                    </td>
+
+                </tr>
+
+                {% else %}
+
+                <tr>
+                    <td colspan="9">
+                        No mileage has been submitted yet.
+                    </td>
+                </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
     </div>
+
 </div>
+
 {% endblock %}
