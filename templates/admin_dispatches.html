@@ -3,19 +3,14 @@
 {% block content %}
 
 <div class="top-row">
-
     <div>
         <h2>Admin Dispatches</h2>
-
         <p class="muted">
             Create and assign loads to contractors.
         </p>
     </div>
-
 </div>
 
-
-<!-- CREATE DISPATCH -->
 
 <div class="card">
 
@@ -32,19 +27,15 @@
             name="driver_id"
             required
         >
-
             <option value="">
                 Select contractor
             </option>
 
             {% for d in drivers %}
-
             <option value="{{ d.id }}">
                 {{ d.name }} - {{ d.username }}
             </option>
-
             {% endfor %}
-
         </select>
 
 
@@ -52,16 +43,39 @@
             Pickup Information
         </h3>
 
-        <label for="pickup_company">
-            Pickup Company
-        </label>
+        <div style="position:relative;">
 
-        <input
-            type="text"
-            id="pickup_company"
-            name="pickup_company"
-            placeholder="Company name"
-        >
+            <label for="pickup_company">
+                Pickup Company
+            </label>
+
+            <input
+                type="text"
+                id="pickup_company"
+                name="pickup_company"
+                placeholder="Start typing company name"
+                autocomplete="off"
+            >
+
+            <div
+                id="pickup_suggestions"
+                style="
+                    display:none;
+                    position:absolute;
+                    left:0;
+                    right:0;
+                    top:100%;
+                    background:white;
+                    border:1px solid #ccc;
+                    border-radius:6px;
+                    max-height:220px;
+                    overflow-y:auto;
+                    z-index:1000;
+                    box-shadow:0 4px 10px rgba(0,0,0,0.15);
+                "
+            ></div>
+
+        </div>
 
 
         <label for="pickup_address">
@@ -116,16 +130,39 @@
             Delivery Information
         </h3>
 
-        <label for="delivery_company">
-            Delivery Company
-        </label>
+        <div style="position:relative;">
 
-        <input
-            type="text"
-            id="delivery_company"
-            name="delivery_company"
-            placeholder="Company name"
-        >
+            <label for="delivery_company">
+                Delivery Company
+            </label>
+
+            <input
+                type="text"
+                id="delivery_company"
+                name="delivery_company"
+                placeholder="Start typing company name"
+                autocomplete="off"
+            >
+
+            <div
+                id="delivery_suggestions"
+                style="
+                    display:none;
+                    position:absolute;
+                    left:0;
+                    right:0;
+                    top:100%;
+                    background:white;
+                    border:1px solid #ccc;
+                    border-radius:6px;
+                    max-height:220px;
+                    overflow-y:auto;
+                    z-index:1000;
+                    box-shadow:0 4px 10px rgba(0,0,0,0.15);
+                "
+            ></div>
+
+        </div>
 
 
         <label for="delivery_address">
@@ -237,8 +274,6 @@
 </div>
 
 
-<!-- CURRENT DISPATCHES -->
-
 <div class="card">
 
     <h3>Current Dispatches</h3>
@@ -252,7 +287,6 @@
         <table style="min-width:1400px;">
 
             <thead>
-
                 <tr>
                     <th>Contractor</th>
                     <th>Status</th>
@@ -267,7 +301,6 @@
                     <th>Instructions</th>
                     <th>Delete</th>
                 </tr>
-
             </thead>
 
             <tbody>
@@ -296,8 +329,12 @@
 
                     <td>
                         {% if d.pickup_company %}
-                            <strong>{{ d.pickup_company }}</strong><br>
+                            <strong>
+                                {{ d.pickup_company }}
+                            </strong>
+                            <br>
                         {% endif %}
+
                         {{ d.pickup_address }}
                     </td>
 
@@ -314,8 +351,12 @@
 
                     <td>
                         {% if d.delivery_company %}
-                            <strong>{{ d.delivery_company }}</strong><br>
+                            <strong>
+                                {{ d.delivery_company }}
+                            </strong>
+                            <br>
                         {% endif %}
+
                         {{ d.delivery_address }}
                     </td>
 
@@ -377,11 +418,9 @@
                 {% else %}
 
                 <tr>
-
                     <td colspan="12">
                         No dispatches have been created yet.
                     </td>
-
                 </tr>
 
                 {% endfor %}
@@ -405,5 +444,284 @@
     </a>
 
 </div>
+
+
+<script>
+
+function setupLocationAutocomplete(
+    companyInputId,
+    addressInputId,
+    contactInputId,
+    phoneInputId,
+    suggestionsId
+) {
+
+    const companyInput =
+        document.getElementById(companyInputId);
+
+    const addressInput =
+        document.getElementById(addressInputId);
+
+    const contactInput =
+        document.getElementById(contactInputId);
+
+    const phoneInput =
+        document.getElementById(phoneInputId);
+
+    const suggestionsBox =
+        document.getElementById(suggestionsId);
+
+
+    let timer = null;
+
+
+    companyInput.addEventListener(
+        "input",
+        function() {
+
+            clearTimeout(timer);
+
+            const query =
+                companyInput.value.trim();
+
+
+            if (query.length < 1) {
+
+                suggestionsBox.style.display =
+                    "none";
+
+                suggestionsBox.innerHTML = "";
+
+                return;
+            }
+
+
+            timer = setTimeout(
+                async function() {
+
+                    try {
+
+                        const response =
+                            await fetch(
+                                "/admin/location-search?q="
+                                + encodeURIComponent(query)
+                            );
+
+
+                        if (!response.ok) {
+
+                            suggestionsBox.style.display =
+                                "none";
+
+                            return;
+                        }
+
+
+                        const locations =
+                            await response.json();
+
+
+                        suggestionsBox.innerHTML =
+                            "";
+
+
+                        if (!locations.length) {
+
+                            suggestionsBox.style.display =
+                                "none";
+
+                            return;
+                        }
+
+
+                        locations.forEach(
+                            function(location) {
+
+                                const item =
+                                    document.createElement(
+                                        "div"
+                                    );
+
+
+                                item.style.padding =
+                                    "10px";
+
+                                item.style.cursor =
+                                    "pointer";
+
+                                item.style.borderBottom =
+                                    "1px solid #eee";
+
+
+                                let label =
+                                    "<strong>"
+                                    + escapeHtml(
+                                        location.company_name
+                                    )
+                                    + "</strong>";
+
+
+                                if (location.address) {
+
+                                    label +=
+                                        "<br><span style='font-size:13px;'>"
+                                        + escapeHtml(
+                                            location.address
+                                        )
+                                        + "</span>";
+                                }
+
+
+                                if (location.contact_name) {
+
+                                    label +=
+                                        "<br><span style='font-size:12px;color:#666;'>"
+                                        + escapeHtml(
+                                            location.contact_name
+                                        )
+                                        + "</span>";
+                                }
+
+
+                                item.innerHTML =
+                                    label;
+
+
+                                item.addEventListener(
+                                    "click",
+                                    function() {
+
+                                        companyInput.value =
+                                            location.company_name
+                                            || "";
+
+                                        addressInput.value =
+                                            location.address
+                                            || "";
+
+                                        contactInput.value =
+                                            location.contact_name
+                                            || "";
+
+                                        phoneInput.value =
+                                            location.phone
+                                            || "";
+
+
+                                        suggestionsBox.style.display =
+                                            "none";
+
+                                        suggestionsBox.innerHTML =
+                                            "";
+                                    }
+                                );
+
+
+                                item.addEventListener(
+                                    "mouseenter",
+                                    function() {
+
+                                        item.style.background =
+                                            "#f5f5f5";
+                                    }
+                                );
+
+
+                                item.addEventListener(
+                                    "mouseleave",
+                                    function() {
+
+                                        item.style.background =
+                                            "white";
+                                    }
+                                );
+
+
+                                suggestionsBox.appendChild(
+                                    item
+                                );
+
+                            }
+                        );
+
+
+                        suggestionsBox.style.display =
+                            "block";
+
+
+                    } catch (error) {
+
+                        console.error(
+                            "Location search error:",
+                            error
+                        );
+
+
+                        suggestionsBox.style.display =
+                            "none";
+                    }
+
+                },
+                250
+            );
+
+        }
+    );
+
+
+    document.addEventListener(
+        "click",
+        function(event) {
+
+            if (
+                !companyInput.contains(
+                    event.target
+                )
+                &&
+                !suggestionsBox.contains(
+                    event.target
+                )
+            ) {
+
+                suggestionsBox.style.display =
+                    "none";
+            }
+
+        }
+    );
+
+}
+
+
+function escapeHtml(text) {
+
+    const div =
+        document.createElement("div");
+
+    div.textContent =
+        text || "";
+
+    return div.innerHTML;
+}
+
+
+setupLocationAutocomplete(
+    "pickup_company",
+    "pickup_address",
+    "pickup_contact",
+    "pickup_phone",
+    "pickup_suggestions"
+);
+
+
+setupLocationAutocomplete(
+    "delivery_company",
+    "delivery_address",
+    "delivery_contact",
+    "delivery_phone",
+    "delivery_suggestions"
+);
+
+</script>
 
 {% endblock %}
