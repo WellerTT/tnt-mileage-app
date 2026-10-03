@@ -8,7 +8,7 @@
         <h2>Admin Dashboard</h2>
 
         <p class="muted">
-            You can see all drivers. Drivers cannot see each other.
+            You can see all contractors. Contractors cannot see each other.
         </p>
     </div>
 
@@ -41,6 +41,13 @@
         href="{{ url_for('admin_reimbursements') }}"
     >
         Reimbursements
+    </a>
+
+    <a
+        class="button-link"
+        href="{{ url_for('admin_dispatches') }}"
+    >
+        Dispatches
     </a>
 
 </div>
@@ -96,11 +103,9 @@
                 {% else %}
 
                 <tr>
-
                     <td colspan="4">
                         No drivers added yet.
                     </td>
-
                 </tr>
 
                 {% endfor %}
