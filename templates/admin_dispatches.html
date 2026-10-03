@@ -1,0 +1,409 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="top-row">
+
+    <div>
+        <h2>Admin Dispatches</h2>
+
+        <p class="muted">
+            Create and assign loads to contractors.
+        </p>
+    </div>
+
+</div>
+
+
+<!-- CREATE DISPATCH -->
+
+<div class="card">
+
+    <h3>Create Dispatch</h3>
+
+    <form method="post">
+
+        <label for="driver_id">
+            Contractor
+        </label>
+
+        <select
+            id="driver_id"
+            name="driver_id"
+            required
+        >
+
+            <option value="">
+                Select contractor
+            </option>
+
+            {% for d in drivers %}
+
+            <option value="{{ d.id }}">
+                {{ d.name }} - {{ d.username }}
+            </option>
+
+            {% endfor %}
+
+        </select>
+
+
+        <h3 style="margin-top:25px;">
+            Pickup Information
+        </h3>
+
+        <label for="pickup_company">
+            Pickup Company
+        </label>
+
+        <input
+            type="text"
+            id="pickup_company"
+            name="pickup_company"
+            placeholder="Company name"
+        >
+
+
+        <label for="pickup_address">
+            Pickup Address
+        </label>
+
+        <input
+            type="text"
+            id="pickup_address"
+            name="pickup_address"
+            placeholder="Street, City, State ZIP"
+            required
+        >
+
+
+        <label for="pickup_contact">
+            Pickup Contact
+        </label>
+
+        <input
+            type="text"
+            id="pickup_contact"
+            name="pickup_contact"
+            placeholder="Contact name"
+        >
+
+
+        <label for="pickup_phone">
+            Pickup Phone
+        </label>
+
+        <input
+            type="tel"
+            id="pickup_phone"
+            name="pickup_phone"
+            placeholder="Phone number"
+        >
+
+
+        <label for="pickup_datetime">
+            Pickup Date / Time
+        </label>
+
+        <input
+            type="datetime-local"
+            id="pickup_datetime"
+            name="pickup_datetime"
+        >
+
+
+        <h3 style="margin-top:25px;">
+            Delivery Information
+        </h3>
+
+        <label for="delivery_company">
+            Delivery Company
+        </label>
+
+        <input
+            type="text"
+            id="delivery_company"
+            name="delivery_company"
+            placeholder="Company name"
+        >
+
+
+        <label for="delivery_address">
+            Delivery Address
+        </label>
+
+        <input
+            type="text"
+            id="delivery_address"
+            name="delivery_address"
+            placeholder="Street, City, State ZIP"
+            required
+        >
+
+
+        <label for="delivery_contact">
+            Delivery Contact
+        </label>
+
+        <input
+            type="text"
+            id="delivery_contact"
+            name="delivery_contact"
+            placeholder="Contact name"
+        >
+
+
+        <label for="delivery_phone">
+            Delivery Phone
+        </label>
+
+        <input
+            type="tel"
+            id="delivery_phone"
+            name="delivery_phone"
+            placeholder="Phone number"
+        >
+
+
+        <label for="delivery_datetime">
+            Delivery Date / Time
+        </label>
+
+        <input
+            type="datetime-local"
+            id="delivery_datetime"
+            name="delivery_datetime"
+        >
+
+
+        <h3 style="margin-top:25px;">
+            Vehicle Information
+        </h3>
+
+        <label for="unit_number">
+            Unit Number
+        </label>
+
+        <input
+            type="text"
+            id="unit_number"
+            name="unit_number"
+            placeholder="Unit number"
+        >
+
+
+        <label for="vin">
+            VIN
+        </label>
+
+        <input
+            type="text"
+            id="vin"
+            name="vin"
+            placeholder="Vehicle Identification Number"
+        >
+
+
+        <label for="truck_type">
+            Truck Type
+        </label>
+
+        <input
+            type="text"
+            id="truck_type"
+            name="truck_type"
+            placeholder="Example: CDL truck, semi, pickup, etc."
+        >
+
+
+        <label for="instructions">
+            Special Instructions
+        </label>
+
+        <textarea
+            id="instructions"
+            name="instructions"
+            rows="5"
+            placeholder="Pickup instructions, delivery instructions, fuel requirements, BOL instructions, etc."
+        ></textarea>
+
+
+        <button type="submit">
+            Send Dispatch
+        </button>
+
+    </form>
+
+</div>
+
+
+<!-- CURRENT DISPATCHES -->
+
+<div class="card">
+
+    <h3>Current Dispatches</h3>
+
+    <p class="muted">
+        Swipe left or right on mobile to see all dispatch details.
+    </p>
+
+    <div class="table-wrap">
+
+        <table style="min-width:1400px;">
+
+            <thead>
+
+                <tr>
+                    <th>Contractor</th>
+                    <th>Status</th>
+                    <th>Unit</th>
+                    <th>VIN</th>
+                    <th>Pickup</th>
+                    <th>Pickup Contact</th>
+                    <th>Delivery</th>
+                    <th>Delivery Contact</th>
+                    <th>Pickup Date</th>
+                    <th>Delivery Date</th>
+                    <th>Instructions</th>
+                    <th>Delete</th>
+                </tr>
+
+            </thead>
+
+            <tbody>
+
+                {% for d in dispatches %}
+
+                <tr>
+
+                    <td>
+                        <strong>
+                            {{ d.driver_name }}
+                        </strong>
+                    </td>
+
+                    <td>
+                        {{ d.status }}
+                    </td>
+
+                    <td>
+                        {{ d.unit_number or "" }}
+                    </td>
+
+                    <td>
+                        {{ d.vin or "" }}
+                    </td>
+
+                    <td>
+                        {% if d.pickup_company %}
+                            <strong>{{ d.pickup_company }}</strong><br>
+                        {% endif %}
+                        {{ d.pickup_address }}
+                    </td>
+
+                    <td>
+                        {{ d.pickup_contact or "" }}
+
+                        {% if d.pickup_phone %}
+                            <br>
+                            <a href="tel:{{ d.pickup_phone }}">
+                                {{ d.pickup_phone }}
+                            </a>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {% if d.delivery_company %}
+                            <strong>{{ d.delivery_company }}</strong><br>
+                        {% endif %}
+                        {{ d.delivery_address }}
+                    </td>
+
+                    <td>
+                        {{ d.delivery_contact or "" }}
+
+                        {% if d.delivery_phone %}
+                            <br>
+                            <a href="tel:{{ d.delivery_phone }}">
+                                {{ d.delivery_phone }}
+                            </a>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        {{ d.pickup_datetime or "" }}
+                    </td>
+
+                    <td>
+                        {{ d.delivery_datetime or "" }}
+                    </td>
+
+                    <td>
+                        {{ d.instructions or "" }}
+                    </td>
+
+                    <td>
+
+                        <form
+                            method="post"
+                            action="{{ url_for('delete_dispatch', dispatch_id=d.id) }}"
+                            onsubmit="return confirm('Are you sure you want to delete this dispatch?');"
+                        >
+
+                            <button
+                                type="submit"
+                                style="
+                                    background:#dc3545;
+                                    color:white;
+                                    border:none;
+                                    border-radius:50%;
+                                    width:30px;
+                                    height:30px;
+                                    padding:0;
+                                    font-size:20px;
+                                    font-weight:bold;
+                                    cursor:pointer;
+                                "
+                            >
+                                −
+                            </button>
+
+                        </form>
+
+                    </td>
+
+                </tr>
+
+                {% else %}
+
+                <tr>
+
+                    <td colspan="12">
+                        No dispatches have been created yet.
+                    </td>
+
+                </tr>
+
+                {% endfor %}
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</div>
+
+
+<div style="margin-top:20px;">
+
+    <a
+        class="button-link"
+        href="{{ url_for('admin_dashboard') }}"
+    >
+        Back to Admin Dashboard
+    </a>
+
+</div>
+
+{% endblock %}
