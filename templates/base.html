@@ -1,37 +1,251 @@
 <!doctype html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>TNT Driveaway Mileage</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-</head>
-<body>
-    <header>
-        <div class="brand">
-            <div class="logo">TNT</div>
-            <div>
-                <h1>TNT DRIVEAWAY</h1>
-                <span>Mileage Tracking</span>
-            </div>
-        </div>
-        {% if session.get('user_id') %}
-        <nav>
-            <span>{{ session.get('name') }}</span>
-            <a href="{{ url_for('logout') }}">Log out</a>
-        </nav>
-        {% endif %}
-    </header>
 
-    <main class="container">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
+<html>
+
+<head>
+
+    <meta charset="utf-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <title>
+        TNT Driveaway Mileage
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='style.css') }}"
+    >
+
+</head>
+
+
+<body>
+
+
+<header>
+
+    <div class="brand">
+
+        <div class="logo">
+            TNT
+        </div>
+
+        <div>
+
+            <h1>
+                TNT DRIVEAWAY
+            </h1>
+
+            <span>
+                Mileage Tracking
+            </span>
+
+        </div>
+
+    </div>
+
+
+    {% if session.get('user_id') %}
+
+    <nav>
+
+        <span>
+            {{ session.get('name') }}
+        </span>
+
+        <a
+            id="logout-link"
+            href="{{ url_for('logout') }}"
+        >
+            Log out
+        </a>
+
+    </nav>
+
+    {% endif %}
+
+</header>
+
+
+
+<main class="container">
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+
+        {% if messages %}
+
             {% for category, message in messages %}
-              <div class="flash {{ category }}">{{ message }}</div>
+
+                <div class="flash {{ category }}">
+                    {{ message }}
+                </div>
+
             {% endfor %}
-          {% endif %}
-        {% endwith %}
-        {% block content %}{% endblock %}
-    </main>
+
+        {% endif %}
+
+    {% endwith %}
+
+
+    {% block content %}
+    {% endblock %}
+
+</main>
+
+
+
+<script>
+
+document.addEventListener(
+    "deviceready",
+    async function () {
+
+        try {
+
+            const OneSignal =
+                window.plugins &&
+                window.plugins.OneSignal
+                    ? window.plugins.OneSignal
+                    : window.OneSignal;
+
+
+            if (!OneSignal) {
+
+                console.log(
+                    "OneSignal is not available in this browser."
+                );
+
+                return;
+            }
+
+
+            /*
+             * TNT Mileage OneSignal App ID
+             */
+
+            OneSignal.initialize(
+                "02b4f356-c4fc-4a57-bb79-bd1577a69fb0"
+            );
+
+
+            /*
+             * Associate this phone with the
+             * contractor/admin currently logged in.
+             */
+
+            {% if session.get('user_id') %}
+
+            OneSignal.login(
+                "tnt-user-{{ session.get('user_id') }}"
+            );
+
+            {% endif %}
+
+
+            /*
+             * Ask contractors for permission
+             * to receive push notifications.
+             *
+             * We do not need to prompt the admin.
+             */
+
+            {% if session.get('role') == 'driver' %}
+
+            const accepted =
+                await OneSignal.Notifications
+                    .requestPermission(true);
+
+            console.log(
+                "Notification permission:",
+                accepted
+            );
+
+            {% endif %}
+
+
+        } catch (error) {
+
+            console.error(
+                "OneSignal setup error:",
+                error
+            );
+
+        }
+
+    },
+    false
+);
+
+
+
+/*
+ * Disconnect the OneSignal user when
+ * someone logs out.
+ *
+ * This is especially important if multiple
+ * contractors ever use the same phone.
+ */
+
+const logoutLink =
+    document.getElementById(
+        "logout-link"
+    );
+
+
+if (logoutLink) {
+
+    logoutLink.addEventListener(
+        "click",
+        async function (event) {
+
+            const destination =
+                logoutLink.href;
+
+
+            try {
+
+                const OneSignal =
+                    window.plugins &&
+                    window.plugins.OneSignal
+                        ? window.plugins.OneSignal
+                        : window.OneSignal;
+
+
+                if (OneSignal) {
+
+                    event.preventDefault();
+
+                    await OneSignal.logout();
+
+                    window.location.href =
+                        destination;
+
+                }
+
+            } catch (error) {
+
+                console.error(
+                    "OneSignal logout error:",
+                    error
+                );
+
+                window.location.href =
+                    destination;
+
+            }
+
+        }
+    );
+
+}
+
+</script>
+
+
 </body>
+
 </html>
