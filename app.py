@@ -28,7 +28,10 @@ from io import BytesIO
 from decimal import Decimal, InvalidOperation
 
 import hashlib
+import json
 import os
+import urllib.request
+import urllib.error
 
 
 # =========================================================
@@ -47,6 +50,14 @@ app.secret_key = os.environ.get(
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
+
+ONESIGNAL_APP_ID = os.environ.get(
+    "ONESIGNAL_APP_ID"
+)
+
+ONESIGNAL_REST_API_KEY = os.environ.get(
+    "ONESIGNAL_REST_API_KEY"
+)
 
 cloudinary.config(secure=True)
 
@@ -77,7 +88,6 @@ def init_db():
     conn = get_db()
     cur = conn.cursor()
 
-
     # -----------------------------------------------------
     # USERS
     # -----------------------------------------------------
@@ -93,7 +103,6 @@ def init_db():
             active INTEGER NOT NULL DEFAULT 1
         )
     """)
-
 
     # -----------------------------------------------------
     # MILEAGE
@@ -116,7 +125,6 @@ def init_db():
                 REFERENCES users(id)
         )
     """)
-
 
     # -----------------------------------------------------
     # REIMBURSEMENTS
@@ -156,7 +164,6 @@ def init_db():
         idx_reimbursements_receipt_sha256
         ON reimbursements(receipt_sha256)
     """)
-
 
     # -----------------------------------------------------
     # DISPATCHES
@@ -198,7 +205,6 @@ def init_db():
         )
     """)
 
-
     # -----------------------------------------------------
     # SAVED DISPATCH LOCATIONS
     # -----------------------------------------------------
@@ -222,7 +228,6 @@ def init_db():
     cur.execute("""
         CREATE INDEX IF NOT EXISTS
         idx_dispatch_locations_company
-
         ON dispatch_locations (
             LOWER(company_name)
         )
@@ -231,15 +236,12 @@ def init_db():
     cur.execute("""
         CREATE INDEX IF NOT EXISTS
         idx_dispatch_locations_address
-
         ON dispatch_locations (
             LOWER(address)
         )
     """)
 
-
     conn.commit()
-
 
     # -----------------------------------------------------
     # ADMIN ACCOUNT
@@ -250,11 +252,8 @@ def init_db():
         SELECT
             id,
             password_hash
-
         FROM users
-
         WHERE role=%s
-
         LIMIT 1
         """,
         ("admin",)
@@ -266,7 +265,6 @@ def init_db():
         "ADMIN_PASSWORD"
     )
 
-
     if not admin:
 
         cur.execute(
@@ -277,7 +275,6 @@ def init_db():
                 password_hash,
                 role
             )
-
             VALUES (
                 %s,
                 %s,
@@ -298,7 +295,6 @@ def init_db():
 
         conn.commit()
 
-
     elif admin_password:
 
         if not check_password_hash(
@@ -309,9 +305,7 @@ def init_db():
             cur.execute(
                 """
                 UPDATE users
-
                 SET password_hash=%s
-
                 WHERE role='admin'
                 """,
                 (
@@ -323,14 +317,12 @@ def init_db():
 
             conn.commit()
 
-
     cur.close()
     conn.close()
 
 
 @app.before_request
 def setup():
-
     init_db()
 
 
@@ -347,6 +339,127 @@ def require_login(role=None):
         return False
 
     return True
+
+
+# =========================================================
+# ONESIGNAL PUSH NOTIFICATIONS
+# =========================================================
+
+def send_push_notification(
+    user_id,
+    title,
+    message,
+    dispatch_id=None
+):
+
+    if not ONESIGNAL_APP_ID:
+        app.logger.warning(
+            "ONESIGNAL_APP_ID is not configured."
+        )
+        return False
+
+    if not ONESIGNAL_REST_API_KEY:
+        app.logger.warning(
+            "ONESIGNAL_REST_API_KEY is not configured."
+        )
+        return False
+
+    external_id = (
+        f"tnt-user-{user_id}"
+    )
+
+    payload = {
+        "app_id": ONESIGNAL_APP_ID,
+
+        "target_channel": "push",
+
+        "include_aliases": {
+            "external_id": [
+                external_id
+            ]
+        },
+
+        "headings": {
+            "en": title
+        },
+
+        "contents": {
+            "en": message
+        }
+    }
+
+    if dispatch_id:
+
+        payload["data"] = {
+            "type": "dispatch",
+            "dispatch_id": dispatch_id
+        }
+
+    try:
+
+        body = json.dumps(
+            payload
+        ).encode("utf-8")
+
+        api_request = urllib.request.Request(
+            "https://api.onesignal.com/notifications?c=push",
+            data=body,
+            headers={
+                "Content-Type":
+                    "application/json; charset=utf-8",
+
+                "Authorization":
+                    f"Key {ONESIGNAL_REST_API_KEY}"
+            },
+            method="POST"
+        )
+
+        with urllib.request.urlopen(
+            api_request,
+            timeout=15
+        ) as response:
+
+            response_body = (
+                response.read()
+                .decode("utf-8")
+            )
+
+            app.logger.info(
+                "OneSignal notification sent "
+                "to %s: %s",
+                external_id,
+                response_body
+            )
+
+        return True
+
+    except urllib.error.HTTPError as e:
+
+        error_body = ""
+
+        try:
+            error_body = (
+                e.read()
+                .decode("utf-8")
+            )
+        except Exception:
+            pass
+
+        app.logger.error(
+            "OneSignal HTTP error %s: %s",
+            e.code,
+            error_body
+        )
+
+        return False
+
+    except Exception:
+
+        app.logger.exception(
+            "ONESIGNAL PUSH FAILED"
+        )
+
+        return False
 
 
 # =========================================================
@@ -376,21 +489,15 @@ def save_dispatch_location(
         phone or ""
     ).strip()
 
-
-    # We only save it when a company
-    # and address were entered.
     if not company_name or not address:
         return
-
 
     conn = get_db()
     cur = conn.cursor()
 
-
     cur.execute(
         """
         SELECT id
-
         FROM dispatch_locations
 
         WHERE LOWER(company_name)=LOWER(%s)
@@ -405,13 +512,11 @@ def save_dispatch_location(
         )
     )
 
-
     existing = cur.fetchone()
 
     now = datetime.now().isoformat(
         timespec="seconds"
     )
-
 
     if existing:
 
@@ -437,7 +542,6 @@ def save_dispatch_location(
                 existing["id"]
             )
         )
-
 
     else:
 
@@ -472,7 +576,6 @@ def save_dispatch_location(
                 now
             )
         )
-
 
     conn.commit()
 
@@ -531,8 +634,6 @@ def find_duplicate_receipt(
     conn = get_db()
     cur = conn.cursor()
 
-
-    # EXACT DUPLICATE
     cur.execute(
         """
         SELECT
@@ -556,9 +657,7 @@ def find_duplicate_receipt(
         )
     )
 
-
     exact_duplicate = cur.fetchone()
-
 
     if exact_duplicate:
 
@@ -570,8 +669,6 @@ def find_duplicate_receipt(
             "entry": exact_duplicate
         }
 
-
-    # VISUAL DUPLICATE
     if perceptual_hash:
 
         cur.execute(
@@ -601,7 +698,6 @@ def find_duplicate_receipt(
             perceptual_hash
         )
 
-
         for previous in previous_receipts:
 
             try:
@@ -616,7 +712,6 @@ def find_duplicate_receipt(
                     new_hash - old_hash
                 )
 
-
                 if distance <= 4:
 
                     cur.close()
@@ -629,9 +724,7 @@ def find_duplicate_receipt(
                     }
 
             except Exception:
-
                 continue
-
 
     cur.close()
     conn.close()
@@ -668,7 +761,6 @@ def login():
             )
         )
 
-
     if request.method == "POST":
 
         username = request.form[
@@ -685,10 +777,8 @@ def login():
             ) == "yes"
         )
 
-
         conn = get_db()
         cur = conn.cursor()
-
 
         cur.execute(
             """
@@ -705,13 +795,10 @@ def login():
             )
         )
 
-
         user = cur.fetchone()
-
 
         cur.close()
         conn.close()
-
 
         if user and check_password_hash(
             user["password_hash"],
@@ -736,7 +823,6 @@ def login():
                 user["role"]
             )
 
-
             if user["role"] == "admin":
 
                 return redirect(
@@ -745,19 +831,16 @@ def login():
                     )
                 )
 
-
             return redirect(
                 url_for(
                     "driver_dashboard"
                 )
             )
 
-
         flash(
             "Invalid username or password.",
             "error"
         )
-
 
     return render_template(
         "login.html"
@@ -780,10 +863,8 @@ def forgot_password():
             "username"
         ].strip()
 
-
         conn = get_db()
         cur = conn.cursor()
-
 
         cur.execute(
             """
@@ -800,13 +881,10 @@ def forgot_password():
             )
         )
 
-
         user = cur.fetchone()
-
 
         cur.close()
         conn.close()
-
 
         if user:
 
@@ -823,7 +901,6 @@ def forgot_password():
                 "Please check your username and try again.",
                 "error"
             )
-
 
     return render_template(
         "forgot_password.html"
@@ -862,10 +939,8 @@ def driver_dashboard():
             url_for("login")
         )
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     if request.method == "POST":
 
@@ -892,7 +967,6 @@ def driver_dashboard():
             "notes",
             ""
         ).strip()
-
 
         try:
 
@@ -924,7 +998,6 @@ def driver_dashboard():
                 )
             )
 
-
         if ending < beginning:
 
             cur.close()
@@ -941,11 +1014,9 @@ def driver_dashboard():
                 )
             )
 
-
         total = (
             ending - beginning
         )
-
 
         cur.execute(
             """
@@ -995,16 +1066,13 @@ def driver_dashboard():
             )
         )
 
-
         conn.commit()
-
 
         flash(
             f"Mileage submitted: "
             f"{total:,.1f} miles.",
             "success"
         )
-
 
     cur.execute(
         """
@@ -1025,9 +1093,7 @@ def driver_dashboard():
         )
     )
 
-
     entries = cur.fetchall()
-
 
     cur.execute(
         """
@@ -1049,7 +1115,6 @@ def driver_dashboard():
         )
     )
 
-
     total_row = cur.fetchone()
 
     total_miles = (
@@ -1058,10 +1123,8 @@ def driver_dashboard():
         ]
     )
 
-
     cur.close()
     conn.close()
-
 
     return render_template(
         "driver.html",
@@ -1087,7 +1150,6 @@ def reimbursements():
         return redirect(
             url_for("login")
         )
-
 
     if request.method == "POST":
 
@@ -1115,7 +1177,6 @@ def reimbursements():
             "receipt"
         )
 
-
         if not expense_date:
 
             flash(
@@ -1129,7 +1190,6 @@ def reimbursements():
                 )
             )
 
-
         if not expense_type:
 
             flash(
@@ -1142,7 +1202,6 @@ def reimbursements():
                     "reimbursements"
                 )
             )
-
 
         try:
 
@@ -1168,7 +1227,6 @@ def reimbursements():
                 )
             )
 
-
         if amount <= 0:
 
             flash(
@@ -1181,7 +1239,6 @@ def reimbursements():
                     "reimbursements"
                 )
             )
-
 
         try:
 
@@ -1205,9 +1262,7 @@ def reimbursements():
                 )
             )
 
-
         today = date.today()
-
 
         if submitted_expense_date > today:
 
@@ -1222,12 +1277,10 @@ def reimbursements():
                 )
             )
 
-
         oldest_allowed_date = (
             today
             - timedelta(days=7)
         )
-
 
         if (
             submitted_expense_date
@@ -1246,10 +1299,8 @@ def reimbursements():
                 )
             )
 
-
         conn = get_db()
         cur = conn.cursor()
-
 
         cur.execute(
             """
@@ -1279,13 +1330,10 @@ def reimbursements():
             )
         )
 
-
         duplicate = cur.fetchone()
-
 
         cur.close()
         conn.close()
-
 
         if duplicate:
 
@@ -1300,7 +1348,6 @@ def reimbursements():
                     "reimbursements"
                 )
             )
-
 
         if (
             not receipt
@@ -1318,7 +1365,6 @@ def reimbursements():
                 )
             )
 
-
         if not receipt.mimetype.startswith(
             "image/"
         ):
@@ -1333,7 +1379,6 @@ def reimbursements():
                     "reimbursements"
                 )
             )
-
 
         try:
 
@@ -1354,7 +1399,6 @@ def reimbursements():
                 )
             )
 
-
         if not receipt_bytes:
 
             flash(
@@ -1368,7 +1412,6 @@ def reimbursements():
                 )
             )
 
-
         (
             receipt_sha256,
             receipt_phash
@@ -1376,14 +1419,12 @@ def reimbursements():
             receipt_bytes
         )
 
-
         image_duplicate = (
             find_duplicate_receipt(
                 receipt_sha256,
                 receipt_phash
             )
         )
-
 
         if image_duplicate:
 
@@ -1409,16 +1450,13 @@ def reimbursements():
                     "error"
                 )
 
-
             return redirect(
                 url_for(
                     "reimbursements"
                 )
             )
 
-
         uploaded_public_id = None
-
 
         try:
 
@@ -1431,7 +1469,6 @@ def reimbursements():
                 or "receipt.jpg"
             )
 
-
             upload_result = (
                 cloudinary.uploader.upload(
                     receipt_file,
@@ -1443,13 +1480,11 @@ def reimbursements():
                 )
             )
 
-
             receipt_url = (
                 upload_result[
                     "secure_url"
                 ]
             )
-
 
             uploaded_public_id = (
                 upload_result[
@@ -1457,10 +1492,8 @@ def reimbursements():
                 ]
             )
 
-
             conn = get_db()
             cur = conn.cursor()
-
 
             cur.execute(
                 """
@@ -1477,17 +1510,14 @@ def reimbursements():
                 )
             )
 
-
             duplicate_after_upload = (
                 cur.fetchone()
             )
-
 
             if duplicate_after_upload:
 
                 cur.close()
                 conn.close()
-
 
                 try:
 
@@ -1496,9 +1526,7 @@ def reimbursements():
                     )
 
                 except Exception:
-
                     pass
-
 
                 flash(
                     "Duplicate receipt detected. "
@@ -1506,13 +1534,11 @@ def reimbursements():
                     "error"
                 )
 
-
                 return redirect(
                     url_for(
                         "reimbursements"
                     )
                 )
-
 
             cur.execute(
                 """
@@ -1565,26 +1591,21 @@ def reimbursements():
                 )
             )
 
-
             conn.commit()
-
 
             cur.close()
             conn.close()
-
 
             flash(
                 "Reimbursement submitted successfully.",
                 "success"
             )
 
-
             return redirect(
                 url_for(
                     "reimbursements"
                 )
             )
-
 
         except Exception:
 
@@ -1597,14 +1618,11 @@ def reimbursements():
                     )
 
                 except Exception:
-
                     pass
-
 
             app.logger.exception(
                 "REIMBURSEMENT UPLOAD FAILED"
             )
-
 
             flash(
                 "There was a problem uploading your reimbursement. "
@@ -1612,17 +1630,14 @@ def reimbursements():
                 "error"
             )
 
-
             return redirect(
                 url_for(
                     "reimbursements"
                 )
             )
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute(
         """
@@ -1643,15 +1658,12 @@ def reimbursements():
         )
     )
 
-
     reimbursement_entries = (
         cur.fetchall()
     )
 
-
     cur.close()
     conn.close()
-
 
     return render_template(
         "reimbursements.html",
@@ -1678,10 +1690,8 @@ def driver_dispatches():
             url_for("login")
         )
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute(
         """
@@ -1717,13 +1727,10 @@ def driver_dispatches():
         )
     )
 
-
     dispatches = cur.fetchall()
-
 
     cur.close()
     conn.close()
-
 
     return render_template(
         "dispatches.html",
@@ -1751,19 +1758,16 @@ def update_dispatch_status(
             url_for("login")
         )
 
-
     new_status = request.form.get(
         "status",
         ""
     )
-
 
     allowed_statuses = [
         "Assigned",
         "Picked Up",
         "Delivered"
     ]
-
 
     if new_status not in allowed_statuses:
 
@@ -1778,10 +1782,8 @@ def update_dispatch_status(
             )
         )
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute(
         """
@@ -1802,16 +1804,12 @@ def update_dispatch_status(
         )
     )
 
-
     updated = cur.rowcount
-
 
     conn.commit()
 
-
     cur.close()
     conn.close()
-
 
     if updated:
 
@@ -1826,7 +1824,6 @@ def update_dispatch_status(
             "Dispatch was not found.",
             "error"
         )
-
 
     return redirect(
         url_for(
@@ -1850,10 +1847,8 @@ def admin_dashboard():
             url_for("login")
         )
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute("""
         SELECT
@@ -1871,9 +1866,7 @@ def admin_dashboard():
             m.id DESC
     """)
 
-
     entries = cur.fetchall()
-
 
     cur.execute("""
         SELECT
@@ -1908,11 +1901,9 @@ def admin_dashboard():
             u.name
     """)
 
-
     driver_totals = (
         cur.fetchall()
     )
-
 
     cur.execute("""
         SELECT
@@ -1925,11 +1916,9 @@ def admin_dashboard():
         FROM mileage_entries
     """)
 
-
     grand_total_row = (
         cur.fetchone()
     )
-
 
     grand_total = (
         grand_total_row[
@@ -1937,10 +1926,8 @@ def admin_dashboard():
         ]
     )
 
-
     cur.close()
     conn.close()
-
 
     return render_template(
         "admin.html",
@@ -1970,10 +1957,8 @@ def delete_entry(
             url_for("login")
         )
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute(
         """
@@ -1986,16 +1971,12 @@ def delete_entry(
         )
     )
 
-
     deleted = cur.rowcount
-
 
     conn.commit()
 
-
     cur.close()
     conn.close()
-
 
     if deleted:
 
@@ -2010,7 +1991,6 @@ def delete_entry(
             "Mileage entry was not found.",
             "error"
         )
-
 
     return redirect(
         url_for(
@@ -2036,10 +2016,8 @@ def admin_reimbursements():
             url_for("login")
         )
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute("""
         SELECT
@@ -2058,11 +2036,9 @@ def admin_reimbursements():
             r.id DESC
     """)
 
-
     reimbursement_entries = (
         cur.fetchall()
     )
-
 
     cur.execute("""
         SELECT
@@ -2077,11 +2053,9 @@ def admin_reimbursements():
         WHERE status='Unpaid'
     """)
 
-
     unpaid_row = (
         cur.fetchone()
     )
-
 
     unpaid_total = (
         unpaid_row[
@@ -2089,10 +2063,8 @@ def admin_reimbursements():
         ]
     )
 
-
     cur.close()
     conn.close()
-
 
     return render_template(
         "admin_reimbursements.html",
@@ -2124,12 +2096,10 @@ def update_reimbursement_status(
             url_for("login")
         )
 
-
     status = request.form.get(
         "status",
         "Unpaid"
     )
-
 
     if status not in [
         "Paid",
@@ -2138,10 +2108,8 @@ def update_reimbursement_status(
 
         status = "Unpaid"
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute(
         """
@@ -2157,19 +2125,15 @@ def update_reimbursement_status(
         )
     )
 
-
     conn.commit()
-
 
     cur.close()
     conn.close()
-
 
     flash(
         f"Reimbursement marked {status}.",
         "success"
     )
-
 
     return redirect(
         url_for(
@@ -2199,10 +2163,8 @@ def delete_reimbursement(
             url_for("login")
         )
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute(
         """
@@ -2217,23 +2179,19 @@ def delete_reimbursement(
         )
     )
 
-
     reimbursement = (
         cur.fetchone()
     )
-
 
     if not reimbursement:
 
         cur.close()
         conn.close()
 
-
         flash(
             "Reimbursement was not found.",
             "error"
         )
-
 
         return redirect(
             url_for(
@@ -2241,11 +2199,9 @@ def delete_reimbursement(
             )
         )
 
-
     public_id = reimbursement[
         "receipt_public_id"
     ]
-
 
     cur.execute(
         """
@@ -2258,13 +2214,10 @@ def delete_reimbursement(
         )
     )
 
-
     conn.commit()
-
 
     cur.close()
     conn.close()
-
 
     if public_id:
 
@@ -2281,12 +2234,10 @@ def delete_reimbursement(
                 e
             )
 
-
     flash(
         "Reimbursement deleted.",
         "success"
     )
-
 
     return redirect(
         url_for(
@@ -2310,21 +2261,16 @@ def location_search():
 
         return jsonify([]), 403
 
-
     query = request.args.get(
         "q",
         ""
     ).strip()
 
-
     if len(query) < 1:
-
         return jsonify([])
-
 
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute(
         """
@@ -2354,43 +2300,38 @@ def location_search():
         )
     )
 
-
     locations = cur.fetchall()
-
 
     cur.close()
     conn.close()
 
-
     results = []
-
 
     for location in locations:
 
         results.append({
             "id": location["id"],
-            "company_name": (
+
+            "company_name":
                 location[
                     "company_name"
-                ]
-            ),
-            "address": (
+                ],
+
+            "address":
                 location[
                     "address"
-                ]
-            ),
-            "contact_name": (
+                ],
+
+            "contact_name":
                 location[
                     "contact_name"
-                ] or ""
-            ),
-            "phone": (
+                ] or "",
+
+            "phone":
                 location[
                     "phone"
                 ] or ""
-            )
         })
-
 
     return jsonify(results)
 
@@ -2413,7 +2354,6 @@ def admin_dispatches():
             url_for("login")
         )
 
-
     # -----------------------------------------------------
     # CREATE DISPATCH
     # -----------------------------------------------------
@@ -2424,90 +2364,75 @@ def admin_dispatches():
             "driver_id"
         )
 
-
         pickup_company = request.form.get(
             "pickup_company",
             ""
         ).strip()
-
 
         pickup_address = request.form.get(
             "pickup_address",
             ""
         ).strip()
 
-
         pickup_contact = request.form.get(
             "pickup_contact",
             ""
         ).strip()
-
 
         pickup_phone = request.form.get(
             "pickup_phone",
             ""
         ).strip()
 
-
         delivery_company = request.form.get(
             "delivery_company",
             ""
         ).strip()
-
 
         delivery_address = request.form.get(
             "delivery_address",
             ""
         ).strip()
 
-
         delivery_contact = request.form.get(
             "delivery_contact",
             ""
         ).strip()
-
 
         delivery_phone = request.form.get(
             "delivery_phone",
             ""
         ).strip()
 
-
         unit_number = request.form.get(
             "unit_number",
             ""
         ).strip()
-
 
         vin = request.form.get(
             "vin",
             ""
         ).strip()
 
-
         truck_type = request.form.get(
             "truck_type",
             ""
         ).strip()
-
 
         pickup_datetime = request.form.get(
             "pickup_datetime",
             ""
         ).strip()
 
-
         delivery_datetime = request.form.get(
             "delivery_datetime",
             ""
         ).strip()
 
-
         instructions = request.form.get(
             "instructions",
             ""
         ).strip()
-
 
         if not driver_id:
 
@@ -2522,7 +2447,6 @@ def admin_dispatches():
                 )
             )
 
-
         if not pickup_address:
 
             flash(
@@ -2535,7 +2459,6 @@ def admin_dispatches():
                     "admin_dispatches"
                 )
             )
-
 
         if not delivery_address:
 
@@ -2550,14 +2473,14 @@ def admin_dispatches():
                 )
             )
 
-
         conn = get_db()
         cur = conn.cursor()
 
-
         cur.execute(
             """
-            SELECT id
+            SELECT
+                id,
+                name
 
             FROM users
 
@@ -2572,28 +2495,23 @@ def admin_dispatches():
             )
         )
 
-
         driver = cur.fetchone()
-
 
         if not driver:
 
             cur.close()
             conn.close()
 
-
             flash(
                 "That contractor could not be found.",
                 "error"
             )
-
 
             return redirect(
                 url_for(
                     "admin_dispatches"
                 )
             )
-
 
         cur.execute(
             """
@@ -2652,6 +2570,8 @@ def admin_dispatches():
                 %s
 
             )
+
+            RETURNING id
             """,
             (
                 driver_id,
@@ -2683,13 +2603,16 @@ def admin_dispatches():
             )
         )
 
+        new_dispatch = cur.fetchone()
+
+        dispatch_id = (
+            new_dispatch["id"]
+        )
 
         conn.commit()
 
-
         cur.close()
         conn.close()
-
 
         # -------------------------------------------------
         # REMEMBER PICKUP LOCATION
@@ -2702,7 +2625,6 @@ def admin_dispatches():
             pickup_phone
         )
 
-
         # -------------------------------------------------
         # REMEMBER DELIVERY LOCATION
         # -------------------------------------------------
@@ -2714,12 +2636,55 @@ def admin_dispatches():
             delivery_phone
         )
 
+        # -------------------------------------------------
+        # SEND PUSH NOTIFICATION
+        # -------------------------------------------------
 
-        flash(
-            "Dispatch sent to contractor.",
-            "success"
+        pickup_name = (
+            pickup_company
+            or pickup_address
         )
 
+        delivery_name = (
+            delivery_company
+            or delivery_address
+        )
+
+        notification_message = (
+            f"You have been assigned a new dispatch: "
+            f"{pickup_name} → {delivery_name}."
+        )
+
+        if unit_number:
+
+            notification_message += (
+                f" Unit {unit_number}."
+            )
+
+        notification_sent = (
+            send_push_notification(
+                driver_id,
+                "New TNT Dispatch",
+                notification_message,
+                dispatch_id
+            )
+        )
+
+        if notification_sent:
+
+            flash(
+                f"Dispatch sent to {driver['name']} "
+                "and push notification sent.",
+                "success"
+            )
+
+        else:
+
+            flash(
+                f"Dispatch was saved for {driver['name']}, "
+                "but the push notification could not be sent.",
+                "error"
+            )
 
         return redirect(
             url_for(
@@ -2727,14 +2692,12 @@ def admin_dispatches():
             )
         )
 
-
     # -----------------------------------------------------
     # GET DRIVERS + DISPATCHES
     # -----------------------------------------------------
 
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute(
         """
@@ -2753,9 +2716,7 @@ def admin_dispatches():
         """
     )
 
-
     drivers = cur.fetchall()
-
 
     cur.execute(
         """
@@ -2790,13 +2751,10 @@ def admin_dispatches():
         """
     )
 
-
     dispatches = cur.fetchall()
-
 
     cur.close()
     conn.close()
-
 
     return render_template(
         "admin_dispatches.html",
@@ -2826,10 +2784,8 @@ def delete_dispatch(
             url_for("login")
         )
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute(
         """
@@ -2842,16 +2798,12 @@ def delete_dispatch(
         )
     )
 
-
     deleted = cur.rowcount
-
 
     conn.commit()
 
-
     cur.close()
     conn.close()
-
 
     if deleted:
 
@@ -2866,7 +2818,6 @@ def delete_dispatch(
             "Dispatch was not found.",
             "error"
         )
-
 
     return redirect(
         url_for(
@@ -2893,23 +2844,19 @@ def add_driver():
             url_for("login")
         )
 
-
     if request.method == "POST":
 
         name = request.form[
             "name"
         ].strip()
 
-
         username = request.form[
             "username"
         ].strip()
 
-
         password = request.form[
             "password"
         ]
-
 
         if (
             not name
@@ -2928,10 +2875,8 @@ def add_driver():
                 )
             )
 
-
         conn = get_db()
         cur = conn.cursor()
-
 
         try:
 
@@ -2962,32 +2907,26 @@ def add_driver():
                 )
             )
 
-
             conn.commit()
-
 
             flash(
                 f"Driver {name} added.",
                 "success"
             )
 
-
         except psycopg2.IntegrityError:
 
             conn.rollback()
-
 
             flash(
                 "That username already exists.",
                 "error"
             )
 
-
         finally:
 
             cur.close()
             conn.close()
-
 
         return redirect(
             url_for(
@@ -2995,10 +2934,8 @@ def add_driver():
             )
         )
 
-
     conn = get_db()
     cur = conn.cursor()
-
 
     cur.execute("""
         SELECT
@@ -3014,13 +2951,10 @@ def add_driver():
         ORDER BY name
     """)
 
-
     drivers = cur.fetchall()
-
 
     cur.close()
     conn.close()
-
 
     return render_template(
         "add_driver.html",
